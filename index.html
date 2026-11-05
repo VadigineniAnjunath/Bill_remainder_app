@@ -1,5 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Bill Radar</title>
-<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Track subscriptions, EMIs, chitti, insurance savings, bills and debts. Your data stays on your device.">
+<meta name="theme-color" content="#f3f5f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f141c" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bill Radar">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <style>
 /* Layout: one narrow column — salary & what-remains summary, spending split bar, add form, filtered bill list grouped by urgency */
@@ -141,7 +155,13 @@ h2 small{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
   background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:5}
 @media (max-width:520px){.editbox{grid-template-columns:1fr 1fr} form{grid-template-columns:1fr 1fr} form .wide{grid-column:1/-1} .stats{grid-template-columns:1fr 1fr} .stats .stat:last-child{grid-column:1/-1} .remain{text-align:left}}
 </style>
-
+<style>
+html{-webkit-text-size-adjust:100%}
+body{margin:0;padding-top:calc(28px + env(safe-area-inset-top,0px));padding-bottom:calc(56px + env(safe-area-inset-bottom,0px))}
+img{max-width:100%}
+</style>
+</head>
+<body>
 <div class="wrap">
   <header>
     <h1>Bill Radar</h1>
@@ -348,7 +368,7 @@ async function flush(){
   if(again){again=false;flush()}
 }
 function sync(k){
-  const m={ok:'Saved to your account',local:'Saved in this browser only',
+  const m={ok:'Saved to your account',local:'Saved on this device only. Use Export backup now and then.',
     wait:"Can't reach your account yet. Changes are kept in this browser for now.",
     err:"Couldn't save to your account. Changes are kept in this browser for now.",
     full:'Account storage is full. Delete some old items.'};
@@ -749,6 +769,7 @@ $('impYes').onclick=()=>{if(!pendingImport)return;state=pendingImport;pendingImp
 $('impNo').onclick=()=>{pendingImport=null;$('impConfirm').hidden=true};
 render();
 sync('local');
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 (async()=>{
   let db=null;
   try{db=window.claude&&window.claude.use?await window.claude.use('db'):null}catch(e){}
@@ -770,3 +791,6 @@ sync('local');
   },e=>{clearTimeout(t);sync('err')});
 })();
 </script>
+
+</body>
+</html>
