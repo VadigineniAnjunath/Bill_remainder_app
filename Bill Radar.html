@@ -1,0 +1,724 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Bill Radar</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one narrow column — salary & what-remains summary, spending split bar, add form, filtered bill list grouped by urgency */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --fg:#17202e; --muted:#5d6878; --line:#dde2ea;
+  --accent:#2347c7; --accent-ink:#ffffff;
+  --c-emi:#7a3fc4; --c-sub:#2347c7; --c-bill:#0f8a8a; --c-chit:#b85c0c; --c-ins:#b0306a; --c-free:#cfd6e1;
+  --over:#c22f2f; --over-bg:#fbe9e9; --soon:#9a6200; --soon-bg:#fdf1dc; --ok:#1d7a4e; --ok-bg:#e3f4ea;
+  --display:"Bricolage Grotesque",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f141c; --surface:#171e29; --fg:#e7ebf2; --muted:#98a3b4; --line:#2a3341;
+  --accent:#7d97ff; --accent-ink:#0f141c;
+  --c-emi:#b58cf2; --c-sub:#7d97ff; --c-bill:#4fc9c4; --c-chit:#f0a15a; --c-ins:#f08cb8; --c-free:#2f3a4a;
+  --over:#ff8a80; --over-bg:#3a1c1c; --soon:#f3bd5a; --soon-bg:#3a2c12; --ok:#6fd39f; --ok-bg:#15301f; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141c; --surface:#171e29; --fg:#e7ebf2; --muted:#98a3b4; --line:#2a3341;
+  --accent:#7d97ff; --accent-ink:#0f141c;
+  --c-emi:#b58cf2; --c-sub:#7d97ff; --c-bill:#4fc9c4; --c-chit:#f0a15a; --c-ins:#f08cb8; --c-free:#2f3a4a;
+  --over:#ff8a80; --over-bg:#3a1c1c; --soon:#f3bd5a; --soon-bg:#3a2c12; --ok:#6fd39f; --ok-bg:#15301f; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 56px}
+.wrap{max-width:700px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1{font-family:var(--display);font-weight:700;font-size:2rem;margin:0;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:2px 0 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+.salary{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:end}
+.salary label{flex:1 1 180px}
+.remain{flex:1 1 220px;text-align:right}
+.remain b{display:block;font-family:var(--mono);font-size:1.9rem;line-height:1.1;font-variant-numeric:tabular-nums}
+.remain b.neg{color:var(--over)}
+.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.bar{display:flex;height:12px;border-radius:99px;overflow:hidden;background:var(--c-free);margin-top:14px}
+.bar i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:.85rem;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend em{font-style:normal;font-family:var(--mono);color:var(--fg);font-variant-numeric:tabular-nums}
+.dot{width:10px;height:10px;border-radius:3px;display:inline-block}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.stat b{display:block;font-family:var(--mono);font-size:1.2rem;font-variant-numeric:tabular-nums}
+.stat.over b{color:var(--over)}
+.banner{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  border:1px dashed var(--line);border-radius:10px;padding:10px 14px;color:var(--muted);font-size:.9rem}
+form{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:10px}
+form .full{grid-column:1/-1}
+label{display:flex;flex-direction:column;gap:4px;font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);min-width:0}
+input,select{font:inherit;font-size:.95rem;text-transform:none;letter-spacing:0;color:var(--fg);background:var(--bg);
+  border:1px solid var(--line);border-radius:8px;padding:9px 10px;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:8px 12px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.ghost{background:transparent}
+.tabs{display:flex;gap:6px;flex-wrap:wrap}
+.tabs button{border-radius:99px;padding:5px 12px;font-size:.85rem}
+.tabs button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+h2{font-family:var(--display);font-weight:500;font-size:1.05rem;margin:0 0 8px;display:flex;gap:8px;align-items:baseline}
+h2 small{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
+.list{display:flex;flex-direction:column;gap:8px;list-style:none;margin:0;padding:0}
+.item{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--c);border-radius:10px;padding:12px 14px;
+  display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}
+.item .name{font-weight:600;min-width:0;overflow-wrap:anywhere}
+.item .amt{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;font-size:1.05rem}
+.meta{color:var(--muted);font-size:.85rem;display:flex;gap:4px 8px;flex-wrap:wrap;align-items:center}
+.pill{font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:99px}
+.pill.over{color:var(--over);background:var(--over-bg)} .pill.soon{color:var(--soon);background:var(--soon-bg)} .pill.ok{color:var(--ok);background:var(--ok-bg)}
+.emi{grid-column:1/-1;display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted)}
+.emi .track{height:6px;border-radius:99px;background:var(--c-free);overflow:hidden}
+.emi .track i{display:block;height:100%;background:var(--c-emi)}
+.emi .row{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.emi .row b{font-family:var(--mono);color:var(--fg);font-weight:500;font-variant-numeric:tabular-nums}
+.actions{display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap}
+.acctable{display:grid;grid-template-columns:minmax(0,1.3fr) repeat(2,minmax(0,1fr));gap:6px 12px;font-size:.92rem}
+.acctable .h{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.acctable .n{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.acctable .h.n{font-family:var(--body)}
+.transfer{margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--bg);border:1px solid var(--line);font-size:.92rem}
+.transfer b{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.chip{font-size:.72rem;font-weight:600;padding:1px 7px;border-radius:6px;border:1px solid var(--line);color:var(--fg)}
+.hist{grid-column:1/-1;font-size:.86rem;color:var(--muted)}
+.hist summary{cursor:pointer;font-weight:600;color:var(--fg);padding:2px 0}
+.hist ol{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:2px}
+.hist li{display:grid;grid-template-columns:7.5em 1fr auto;gap:8px;padding:4px 0;border-bottom:1px dotted var(--line)}
+.hist li b{font-family:var(--mono);font-weight:500;color:var(--ok);font-variant-numeric:tabular-nums}
+.hist li.paid b{color:var(--over)}
+.histfoot{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.histfoot b{font-family:var(--mono);color:var(--fg);font-weight:500}
+.histfoot button{padding:4px 10px;font-size:.8rem}
+.item.save{border-style:dashed;border-left-style:solid}
+.note{grid-column:1/-1;color:var(--muted);font-size:.88rem;overflow-wrap:anywhere}
+.editbox{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px;margin-top:6px;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
+.editbox .wide,.editbox .full{grid-column:1/-1}
+.editbox label small{text-transform:none;letter-spacing:0}
+.sync{margin:4px 0 0;font-size:.82rem;color:var(--muted)}
+.sync[data-k="ok"]::before{content:"● ";color:var(--ok)}
+.sync[data-k="wait"],.sync[data-k="err"],.sync[data-k="full"]{color:var(--soon)}
+.freedlist{display:flex;flex-direction:column;gap:10px}
+.freedlist:empty{display:none}
+.freed{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-color:var(--ok);background:var(--ok-bg)}
+.freed p{margin:0;min-width:0;flex:1 1 260px}
+.freed b{font-family:var(--mono);font-weight:500}
+.tablewrap{overflow-x:auto;margin:0 -4px;padding:0 4px}
+.sumtable{border-collapse:collapse;width:100%;min-width:640px;font-size:.88rem}
+.sumtable th,.sumtable td{padding:7px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+.sumtable th{font-size:.7rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
+.sumtable th:first-child,.sumtable td:first-child{text-align:left;position:sticky;left:0;background:var(--surface)}
+.sumtable td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.sumtable td:first-child,.sumtable td.nt{font-family:var(--body)}
+.sumtable td.nt{text-align:left;color:var(--ok);font-size:.82rem;white-space:normal;min-width:9em}
+.sumtable td.zero{color:var(--muted)}
+.sumtable td.left{font-weight:500}
+.sumtable td.left.neg{color:var(--over)}
+.sumtable tr.now td{background:var(--bg)}
+.sumtable tr.now td:first-child{background:var(--bg)}
+.sumtable tfoot td{border-bottom:0;border-top:2px solid var(--line);font-weight:600}
+.sumtable .dot{margin-right:5px;vertical-align:baseline}
+.sumnote{margin:10px 0 0;color:var(--muted);font-size:.85rem}
+.fix{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
+.fix{align-items:end}
+.fix label{flex:0 1 170px}
+.warn{color:var(--soon);background:var(--soon-bg);border-radius:6px;padding:4px 8px}
+.actions button{padding:5px 10px;font-size:.82rem}
+.debts{display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--line);padding-top:22px}
+.sech{font-size:1.35rem;font-weight:700;margin:0}
+.debtsum{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.debtsum .stat b.owe{color:var(--over)} .debtsum .stat b.owed{color:var(--ok)}
+.empty{color:var(--muted);text-align:center;padding:28px;border:1px dashed var(--line);border-radius:10px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));
+  background:var(--fg);color:var(--bg);padding:9px 16px;border-radius:8px;font-size:.9rem;z-index:5}
+@media (max-width:520px){.editbox{grid-template-columns:1fr 1fr} form{grid-template-columns:1fr 1fr} form .wide{grid-column:1/-1} .stats{grid-template-columns:1fr 1fr} .stats .stat:last-child{grid-column:1/-1} .remain{text-align:left}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Bill Radar</h1>
+    <p class="sub">Salary in, subscriptions, EMIs and bills out. See what's left.</p>
+    <p class="sync" id="sync" aria-live="polite"></p>
+  </header>
+
+  <section id="freed" class="freedlist" aria-label="Finished payments"></section>
+
+  <div class="banner" id="exBanner" hidden>
+    <span>Showing example salary and bills. Enter your own, then clear these.</span>
+    <button class="ghost" id="clearEx" type="button">Clear examples</button>
+  </div>
+
+  <section class="card" aria-label="Salary and remaining money">
+    <div class="salary">
+      <label>Monthly net salary (€)<input id="salary" type="number" step="0.01" min="0" placeholder="e.g. 3200"></label>
+      <label>Salary goes to<select id="salAcc"><option value="cb">Commerzbank</option><option value="n26">N26</option></select></label>
+      <div class="remain">
+        <span class="eyebrow">Left each month after fixed costs</span>
+        <b id="left">€0</b>
+      </div>
+    </div>
+    <div class="bar" id="bar" role="img" aria-label="Salary split"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="card" aria-labelledby="accH">
+    <h2 id="accH">Accounts</h2>
+    <div class="acctable" id="accTable"></div>
+    <div class="transfer" id="transfer"></div>
+  </section>
+
+  <section class="stats" aria-label="Summary">
+    <div class="stat over"><b id="sOver">0</b><span class="eyebrow">Overdue</span></div>
+    <div class="stat"><b id="sMonthLeft">€0</b><span class="eyebrow">Still to pay this month</span></div>
+    <div class="stat"><b id="sDebt">€0</b><span class="eyebrow">Total EMI balance left</span></div>
+  </section>
+
+  <section class="card" aria-labelledby="addH">
+    <h2 id="addH">Add a payment</h2>
+    <form id="addForm">
+      <label class="wide">Name<input id="fName" required placeholder="e.g. Car loan, Spotify, Miete"></label>
+      <label>Type<select id="fType">
+        <option value="sub">Subscription</option><option value="emi">EMI / Loan</option><option value="chit">Chitti</option><option value="ins">Insurance</option><option value="bill">Bill / Rent</option></select></label>
+      <label>Amount (€)<input id="fAmt" type="number" step="0.01" min="0" required placeholder="0.00"></label>
+      <label>Next due date<input id="fDate" type="date" required></label>
+      <label>Pays from<select id="fAcc"><option value="cb">Commerzbank</option><option value="n26">N26</option><option value="cash">Cash</option></select></label>
+      <label>Repeats<select id="fRep">
+        <option value="none">Once</option><option value="weekly">Weekly</option>
+        <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+        <option value="yearly">Yearly</option></select></label>
+      <label id="leftWrap" hidden>Amount still owed (€)<input id="fLeft" type="number" min="0.01" step="0.01" placeholder="e.g. 340"></label>
+      <label id="saveWrap" hidden>Set aside in<select id="fSave">
+        <option value="n26space">N26 Space</option><option value="cb">Commerzbank</option><option value="n26">N26 main</option><option value="cash">Cash</option><option value="">Don't set aside</option></select></label>
+      <label id="spaceWrap" hidden>Space name (optional)<input id="fSpace" maxlength="40" placeholder="e.g. Insurance"></label>
+      <label id="chitWrap" hidden>Months left<input id="fMonths" type="number" min="1" step="1" placeholder="e.g. 14"></label>
+      <label id="endWrap" hidden>End date (optional)<input id="fEnd" type="date"></label>
+      <label id="totWrap" hidden>Original loan (€, optional)<input id="fTot" type="number" min="0.01" step="0.01" placeholder="e.g. 1000"></label>
+      <label class="full">Description (optional)<input id="fNote" maxlength="200" placeholder="e.g. Amex card, auto-debit from N26 on the 12th"></label>
+      <div class="full actions"><button class="primary" type="submit">Add</button></div>
+    </form>
+  </section>
+
+  <div class="tabs" role="group" aria-label="Filter">
+    <button data-f="all" aria-pressed="true">All</button>
+    <button data-f="sub" aria-pressed="false">Subscriptions</button>
+    <button data-f="emi" aria-pressed="false">EMIs</button>
+    <button data-f="chit" aria-pressed="false">Chitti</button>
+    <button data-f="ins" aria-pressed="false">Insurance</button>
+    <button data-f="bill" aria-pressed="false">Bills</button>
+  </div>
+
+  <section id="groups"></section>
+
+  <section class="card" aria-labelledby="sumH">
+    <h2 id="sumH">Monthly summary <small>next 12 months</small></h2>
+    <div class="tablewrap"><table class="sumtable" id="sumTable"></table></div>
+    <p class="sumnote" id="sumNote"></p>
+  </section>
+
+  <section class="debts" aria-labelledby="debtH">
+    <h2 id="debtH" class="sech">Debts</h2>
+    <div class="debtsum" id="debtSum"></div>
+    <div class="card">
+      <form id="debtForm">
+        <label class="wide">Person / what for<input id="dName" required placeholder="e.g. Ravi – laptop money"></label>
+        <label>Direction<select id="dDir"><option value="owe">I owe them</option><option value="owed">They owe me</option></select></label>
+        <label>Amount (€)<input id="dAmt" type="number" step="0.01" min="0.01" required placeholder="0.00"></label>
+        <label>Pay back by (optional)<input id="dDue" type="date"></label>
+        <label class="full">Description (optional)<input id="dNote" maxlength="200" placeholder="e.g. paid for my share of the trip"></label>
+        <div class="full actions"><button class="primary" type="submit">Add debt</button></div>
+      </form>
+    </div>
+    <ul class="list" id="debtList"></ul>
+  </section>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const KEY='billradar.v2', SOON=7;
+const $=id=>document.getElementById(id);
+const iso=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parse=s=>new Date(s+'T00:00');
+const today=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
+const addDays=n=>{const d=today();d.setDate(d.getDate()+n);return iso(d)};
+const eur=n=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n);
+const de=s=>parse(s).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'});
+const monYr=s=>parse(s).toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+const repLabel={none:'Once',weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',yearly:'Yearly'};
+const ACC={cb:'Commerzbank',n26:'N26',cash:'Cash'};
+const typeLabel={sub:'Subscription',emi:'EMI',chit:'Chitti',ins:'Insurance',bill:'Bill'};
+const periodM={quarterly:3,yearly:12};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const firstOf=d=>new Date(d.getFullYear(),d.getMonth(),1);
+const nextFirst=s=>{const d=parse(s);return iso(new Date(d.getFullYear(),d.getMonth()+1,1))};
+// monthly saving plan toward a quarterly/yearly payment: save on the 1st of each month until the due date
+function savePlan(b){
+  if(!pot(b))return null;
+  const saved=b.saved||0,remain=r2(b.amt-saved),next=b.saveNext||iso(firstOf(today()));
+  let d=next,n=0,g=0;while(d<=b.date&&g++<24){n++;d=nextFirst(d)}
+  return{saved,remain,next,n:Math.max(1,n),amt:r2(remain/Math.max(1,n))};
+}
+const placeOf=b=>b.saveTo==='n26space'?`N26 Space${b.space?` “${esc(b.space)}”`:''}`:(ACC[b.saveTo]||'savings');
+// for quarterly/yearly payments: how much to save per month, and how much should be saved by today
+function pot(b){
+  const pm=periodM[b.rep];if(!pm||b.type==='emi'||b.type==='chit'||b.saveTo==='')return null;
+  const due=parse(b.date),prev=new Date(due);prev.setMonth(prev.getMonth()-pm);
+  const frac=Math.min(1,Math.max(0,(today()-prev)/(due-prev)));
+  return{perMonth:r2(b.amt/pm),target:r2(b.amt*frac),frac};
+}
+const perMonth={none:0,weekly:52/12,monthly:1,quarterly:1/3,yearly:1/12};
+
+function advance(s,rep){
+  const d=parse(s),day=d.getDate();
+  if(rep==='weekly'){d.setDate(d.getDate()+7);return iso(d)}
+  const m={monthly:1,quarterly:3,yearly:12}[rep]||0;
+  const t=new Date(d.getFullYear(),d.getMonth()+m,1);
+  const last=new Date(t.getFullYear(),t.getMonth()+1,0).getDate();
+  t.setDate(Math.min(day,last));return iso(t);
+}
+
+const examples={
+  salary:3200,
+  bills:[
+    {name:'Miete',type:'bill',amt:950,date:addDays(26),rep:'monthly'},
+    {name:'Car loan',type:'emi',amt:289,date:addDays(3),rep:'monthly',owed:6250,orig:13500},
+    {name:'Phone EMI (iPhone)',type:'emi',amt:41.6,date:addDays(10),rep:'monthly',owed:270,orig:999},
+    {name:'Chitti',type:'chit',amt:100,date:addDays(8),rep:'monthly',monthsLeft:14},
+    {name:'Rundfunkbeitrag',type:'bill',amt:55.08,date:addDays(-2),rep:'quarterly'},
+    {name:'Handyvertrag',type:'sub',amt:19.99,date:addDays(5),rep:'monthly'},
+    {name:'Deutschlandticket',type:'sub',amt:58,date:addDays(6),rep:'monthly'},
+    {name:'Netflix',type:'sub',amt:13.99,date:addDays(12),rep:'monthly'},
+    {name:'Haftpflichtversicherung',type:'bill',amt:64.5,date:addDays(41),rep:'yearly'},
+  ].map((b,i)=>({...b,id:'ex'+i,example:true})),
+  debts:[
+    {name:'Ravi – flight ticket',dir:'owe',amt:320,due:addDays(25)},
+    {name:'Kiran – borrowed for deposit',dir:'owed',amt:150},
+  ].map((d,i)=>({...d,id:'exd'+i,example:true}))
+};
+
+function normalize(s){
+  if(!s||!Array.isArray(s.bills))return null;
+  if(!Array.isArray(s.debts))s.debts=[];
+  if(!Array.isArray(s.freed))s.freed=[];
+  if(!s.salaryAcc)s.salaryAcc='cb';
+  s.bills.forEach(b=>{
+    if(!b.acc)b.acc=b.example&&b.type==='sub'?'n26':'cb';
+    // older EMIs used a payments-left model; convert to amount owed
+    if(b.type==='emi'&&b.owed==null&&b.left){b.owed=+(b.amt*b.left).toFixed(2);if(b.total)b.orig=+(b.amt*b.total).toFixed(2);delete b.left;delete b.total}
+  });
+  return s;
+}
+let state,fromLocal=false;
+try{state=normalize(JSON.parse(localStorage.getItem(KEY)));fromLocal=!!state}catch(e){}
+if(!state)state=normalize({salary:examples.salary,salaryExample:true,bills:examples.bills,debts:examples.debts});
+
+// storage: account storage (db) when available, this browser as a fast local copy
+let docRef=null,writing=false,again=false,dirty=false,lastJSON='',saveT;
+function persistLocal(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
+function save(){persistLocal();dirty=true;clearTimeout(saveT);saveT=setTimeout(flush,400)}
+async function flush(){
+  if(!docRef)return;
+  if(writing){again=true;return}
+  const s=JSON.stringify(state);
+  if(s===lastJSON){dirty=false;return}
+  writing=true;
+  try{await docRef.set(JSON.parse(s));lastJSON=s;if(JSON.stringify(state)===s)dirty=false;sync('ok')}
+  catch(e){sync(e&&e.code==='quota_exceeded'?'full':'err')}
+  writing=false;
+  if(again){again=false;flush()}
+}
+function sync(k){
+  const m={ok:'Saved to your account',local:'Saved in this browser only',
+    wait:"Can't reach your account yet. Changes are kept in this browser for now.",
+    err:"Couldn't save to your account. Changes are kept in this browser for now.",
+    full:'Account storage is full. Delete some old items.'};
+  const el=$('sync');if(el){el.textContent=m[k]||'';el.dataset.k=k}
+}
+let filter='all';
+const isLoan=b=>b.type==='emi'&&b.owed!=null;
+const r2=n=>Math.round(n*100)/100;
+const isChit=b=>b.type==='chit'&&b.monthsLeft>0;
+const nextAmt=b=>isLoan(b)?Math.min(b.amt,b.owed):b.amt;
+const paysLeft=b=>Math.ceil(r2(b.owed/b.amt)-1e-9);
+
+const daysUntil=s=>Math.round((parse(s)-today())/864e5);
+function status(n){
+  if(n<0)return['over',`${-n} day${n===-1?'':'s'} overdue`];
+  if(n===0)return['over','Due today'];
+  if(n<=SOON)return['soon',`In ${n} day${n===1?'':'s'}`];
+  return['ok',`In ${n} days`];
+}
+// money still to pay from now until end of this month (includes overdue)
+function dueThisMonth(b){
+  const t=today(),end=iso(new Date(t.getFullYear(),t.getMonth()+1,0));
+  let d=b.date,sum=0,owed=isLoan(b)?b.owed:Infinity,cnt=isChit(b)?b.monthsLeft:Infinity,guard=0;
+  while(d<=end&&owed>0.005&&cnt>0&&guard++<60){const p=Math.min(b.amt,owed);sum+=p;owed=r2(owed-p);cnt--;if(b.rep==='none')break;d=advance(d,b.rep)}
+  return sum;
+}
+function countUntil(start,rep,end){let d=start,n=0,g=0;while(d<=end&&g++<600){n++;d=advance(d,rep)}return n}
+const ym=s=>s.slice(0,7);
+function chitEnd(b){let d=b.date;for(let i=1;i<b.monthsLeft;i++)d=advance(d,b.rep);return d}
+function emiEnd(b){let d=b.date;for(let i=1;i<paysLeft(b);i++)d=advance(d,b.rep);return d}
+
+function toast(msg){const t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2400)}
+
+function render(){
+  const B=state.bills;B.sort((a,b)=>a.date.localeCompare(b.date));
+  // salary split
+  const byType={emi:0,chit:0,ins:0,sub:0,bill:0};
+  B.forEach(b=>byType[b.type]+=b.amt*perMonth[b.rep]);
+  const fixed=Object.values(byType).reduce((s,v)=>s+v,0), sal=+state.salary||0, left=sal-fixed;
+  if(document.activeElement!==$('salary')) $('salary').value=sal||'';
+  $('left').textContent=sal?eur(left):'Add salary';
+  $('left').classList.toggle('neg',sal>0&&left<0);
+  const base=Math.max(sal,fixed)||1;
+  const segs=[['emi','EMIs',byType.emi],['chit','Chitti',byType.chit],['ins','Insurance',byType.ins],['sub','Subscriptions',byType.sub],['bill','Bills & rent',byType.bill]];
+  $('bar').innerHTML=segs.map(([k,,v])=>`<i style="width:${v/base*100}%;background:var(--c-${k})"></i>`).join('');
+  $('legend').innerHTML=segs.map(([k,l,v])=>`<span><i class="dot" style="background:var(--c-${k})"></i>${l} <em>${eur(v)}</em></span>`).join('')
+    +(sal?`<span><i class="dot" style="background:var(--c-free)"></i>${left<0?'Short by':'Free'} <em>${eur(Math.abs(left))}</em></span>`:'');
+
+  // per-account totals
+  $('salAcc').value=state.salaryAcc;
+  const acc={};Object.keys(ACC).forEach(k=>acc[k]={avg:0,month:0});
+  B.forEach(b=>{const a=acc[b.acc]||acc.cb;a.avg+=b.amt*perMonth[b.rep];a.month+=dueThisMonth(b)});
+  const monName=today().toLocaleDateString('en-GB',{month:'long'});
+  const used=Object.keys(ACC).filter(k=>k!=='cash'||acc.cash.avg||acc.cash.month);
+  $('accTable').innerHTML=`<span class="h">Account</span><span class="h n">Avg / month</span><span class="h n">Still due in ${monName}</span>`+
+    used.map(k=>`<span>${ACC[k]}${k===state.salaryAcc?' <span class="chip">salary</span>':''}</span><span class="n">${eur(acc[k].avg)}</span><span class="n">${eur(acc[k].month)}</span>`).join('');
+  const from=ACC[state.salaryAcc];
+  const lines=['cb','n26'].filter(k=>k!==state.salaryAcc&&(acc[k].avg||acc[k].month))
+    .map(k=>`Move <b>${eur(acc[k].month)}</b> from ${from} to ${ACC[k]} this month, and about <b>${eur(acc[k].avg)}</b> every month after that.`);
+  if(acc.cash.month) lines.push(`Withdraw <b>${eur(acc.cash.month)}</b> cash for payments still due this month.`);
+  const places={},mEnd=iso(new Date(today().getFullYear(),today().getMonth()+1,0));
+  B.forEach(b=>{const p=savePlan(b);if(!p)return;const k=placeOf(b);const v=(places[k]=places[k]||{now:0,saved:0,total:0,names:[]});
+    if(p.remain>0.005&&p.next<=mEnd)v.now+=p.amt;v.saved+=p.saved;v.total+=b.amt;v.names.push(esc(b.name))});
+  Object.entries(places).forEach(([k,v])=>lines.push(v.now>0.005
+    ?`Move <b>${eur(v.now)}</b> to ${k} this month for ${v.names.join(', ')}. Saved so far <b>${eur(v.saved)}</b> of ${eur(v.total)}.`
+    :`${k} is done for this month for ${v.names.join(', ')}. Saved <b>${eur(v.saved)}</b> of ${eur(v.total)}.`));
+  $('transfer').innerHTML=lines.length?lines.join('<br>'):`All payments come from ${from}. No transfer needed.`;
+
+  const g={over:[],soon:[],ok:[]};
+  B.forEach(b=>g[status(daysUntil(b.date))[0]].push(b));
+  $('sOver').textContent=g.over.length;
+  $('sMonthLeft').textContent=eur(B.reduce((s,b)=>s+dueThisMonth(b),0));
+  $('sDebt').textContent=eur(B.filter(isLoan).reduce((s,b)=>s+b.owed,0));
+  $('exBanner').hidden=!(state.salaryExample||B.some(b=>b.example)||state.debts.some(d=>d.example));
+  renderDebts();
+  renderFreed();
+  renderSummary();
+
+  // monthly "move money to savings" tasks
+  B.forEach(b=>{const p=savePlan(b);if(!p||p.remain<=0.005)return;
+    g[status(daysUntil(p.next))[0]].push({_save:true,parent:b,type:b.type,date:p.next,amt:p.amt,plan:p})});
+  Object.values(g).forEach(a=>a.sort((x,y)=>x.date.localeCompare(y.date)));
+  const titles={over:'Overdue & due today',soon:'Next 7 days',ok:'Later'};
+  const root=$('groups');root.innerHTML='';
+  const shown=b=>filter==='all'||b.type===filter;
+  if(!B.filter(shown).length){root.innerHTML=`<p class="empty">Nothing here yet. Add one with the form above.</p>`;return}
+  for(const k of ['over','soon','ok']){
+    const items=g[k].filter(shown);if(!items.length)continue;
+    const sec=document.createElement('div');sec.style.marginBottom='18px';
+    sec.innerHTML=`<h2>${titles[k]} <small>${eur(items.filter(x=>!x._save).reduce((s,b)=>s+nextAmt(b),0))}</small></h2><ul class="list"></ul>`;
+    const ul=sec.querySelector('ul');
+    items.forEach(b=>{
+      if(b._save){ul.appendChild(saveItem(b));return}
+      const [cls,txt]=status(daysUntil(b.date));
+      const li=document.createElement('li');li.className='item';li.style.setProperty('--c',`var(--c-${b.type})`);
+      let emi='';
+      const last=(isLoan(b)&&b.owed<=b.amt+0.005)||(isChit(b)&&b.monthsLeft===1);
+      const sp=savePlan(b);
+      if(sp){
+        emi=`<div class="emi"><div class="track"><i style="width:${Math.min(100,sp.saved/b.amt*100)}%;background:var(--c-${b.type})"></i></div>
+          <div class="row"><span>Saved <b>${eur(sp.saved)}</b> of ${eur(b.amt)} in ${placeOf(b)}</span><span>${sp.remain>0.005?`Next: save <b>${eur(sp.amt)}</b> on ${de(sp.next)}`:'Fully saved ✓'}</span></div></div>`;
+      }
+      if(b.saveLog&&b.saveLog.length){
+        const L=b.saveLog,tot=L.filter(e=>e.k==='save').reduce((s,e)=>s+e.a,0);
+        emi+=`<details class="hist"><summary>Saving history (${L.length})</summary><ol>`+
+          [...L].reverse().map(e=>e.k==='save'
+            ?`<li><span>${monYr(e.d)}</span><span>Saved</span><b>+${eur(e.a)}</b></li>`
+            :`<li class="paid"><span>${de(e.d)}</span><span>Paid from ${placeOf(b)}${e.from<e.a-0.005?` (only ${eur(e.from)} was saved)`:''}</span><b>−${eur(e.a)}</b></li>`).join('')+
+          `</ol><div class="histfoot"><span>Total saved so far: <b>${eur(tot)}</b></span>${L[L.length-1].k==='save'?'<button class="ghost" data-a="undo">Undo last saving</button>':''}</div></details>`;
+      }
+      if(isChit(b)){
+        emi=`<div class="emi"><div class="row"><span><b>${b.monthsLeft}</b> month${b.monthsLeft===1?'':'s'} left · last payment ${de(chitEnd(b))}</span><span>Remaining <b>${eur(b.amt*b.monthsLeft)}</b></span></div></div>`;
+      }
+      if(isLoan(b)){
+        const n=paysLeft(b),rem=r2(b.owed-b.amt*(n-1));
+        const plan=n===1?eur(b.owed):(rem<b.amt-0.005?`${n-1} × ${eur(b.amt)} + ${eur(rem)}`:`${n} × ${eur(b.amt)}`);
+        const orig=b.orig&&b.orig>=b.owed?b.orig:null;
+        const calcEnd=emiEnd(b);
+        const warn=b.endDate&&ym(b.endDate)!==ym(calcEnd)
+          ?`<span class="warn">Your end date is ${monYr(b.endDate)}, but this balance is paid off by ${monYr(calcEnd)}. Check the amount or balance with your bank.</span>`:'';
+        emi=`<div class="emi">${orig?`<div class="track"><i style="width:${(orig-b.owed)/orig*100}%"></i></div>`:''}
+          <div class="row"><span><b>${n}</b> payment${n===1?'':'s'} left (${plan}) · ends ${monYr(calcEnd)}</span><span>Balance <b>${eur(b.owed)}</b></span></div>
+          <div class="row"><span>From ${monYr(nextFirst(calcEnd))} you get <b>+${eur(b.amt)}</b>/month free</span></div>${warn}</div>`;
+      }
+      if(isChit(b)) emi+=`<div class="emi"><div class="row"><span>From ${monYr(nextFirst(chitEnd(b)))} you get <b>+${eur(b.amt)}</b>/month free</span></div></div>`;
+      li.innerHTML=`<div class="name"></div><div class="amt">${eur(nextAmt(b))}</div>
+        <div class="meta"><span class="pill ${cls}">${txt}</span><span>${de(b.date)}</span><span>· ${typeLabel[b.type]} · ${repLabel[b.rep]}${last&&b.owed<b.amt?' · last payment':''}</span><span class="chip">${ACC[b.acc]||'Commerzbank'}</span></div>
+        <div class="actions"><button class="ghost" data-a="edit">Edit</button><button data-a="paid">${b.rep==='none'||last?'Paid':'Paid → next'}</button><button class="ghost" data-a="del" aria-label="Delete">✕</button></div>${emi}${billEditor(b)}`;
+      li.querySelector('.name').textContent=b.name;
+      addNote(li,b.note);
+      const undo=li.querySelector('[data-a=undo]');
+      if(undo)undo.onclick=()=>{const e=b.saveLog.pop();b.saved=r2(Math.max(0,(b.saved||0)-e.a));b.saveNext=e.d;save();render();toast(`Removed saving of ${eur(e.a)}`)};
+      wireBillEditor(li,b);
+      li.querySelector('[data-a=paid]').onclick=()=>{
+        if(isLoan(b)){
+          const p=nextAmt(b);b.owed=r2(b.owed-p);
+          if(b.owed<=0.005){finish(b);toast(`${b.name} fully paid off 🎉`)}
+          else{b.date=advance(b.date,b.rep);toast(`${b.name}: paid ${eur(p)} · next ${eur(nextAmt(b))} on ${de(b.date)}`)}
+        }
+        else if(isChit(b)){
+          b.monthsLeft--;
+          if(b.monthsLeft<=0){finish(b);toast(`${b.name} complete 🎉`)}
+          else{b.date=advance(b.date,b.rep);toast(`${b.name} paid · ${b.monthsLeft} months left`)}
+        }
+        else if(b.rep==='none'){state.bills=state.bills.filter(x=>x!==b);toast(`${b.name} paid`)}
+        else{if(savePlan(b)){(b.saveLog=b.saveLog||[]).push({k:'paid',d:b.date,a:b.amt,from:b.saved||0,on:iso(today())});b.saved=0;b.saveNext=nextFirst(b.date)}b.date=advance(b.date,b.rep);toast(`${b.name} paid · next ${de(b.date)}`)}
+        save();render()};
+      li.querySelector('[data-a=del]').onclick=()=>{state.bills=state.bills.filter(x=>x!==b);save();render();toast(`${b.name} removed`)};
+      ul.appendChild(li);
+    });
+    root.appendChild(sec);
+  }
+}
+
+$('fDate').value=addDays(0);
+$('fType').addEventListener('change',()=>{const t=$('fType').value,e=t==='emi';$('leftWrap').hidden=!e;$('endWrap').hidden=!e;$('totWrap').hidden=!e;$('chitWrap').hidden=t!=='chit'});
+$('salAcc').addEventListener('change',e=>{state.salaryAcc=e.target.value;save();render()});
+function syncSave(){
+  const t=$('fType').value,show=!!periodM[$('fRep').value]&&t!=='emi'&&t!=='chit';
+  $('saveWrap').hidden=!show;$('spaceWrap').hidden=!show||$('fSave').value!=='n26space';
+}
+$('fType').addEventListener('change',()=>{const t=$('fType').value;if(t==='sub')$('fAcc').value='n26';if(t==='ins'){$('fRep').value='quarterly';$('fSave').value='n26space';if(!$('fSpace').value)$('fSpace').value='Insurance'}syncSave()});
+$('fRep').addEventListener('change',syncSave);$('fSave').addEventListener('change',syncSave);
+$('salary').addEventListener('input',e=>{state.salary=parseFloat(e.target.value)||0;state.salaryExample=false;save();render()});
+$('addForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=$('fName').value.trim(),amt=parseFloat($('fAmt').value),type=$('fType').value;
+  if(!name||isNaN(amt))return;
+  const b={id:Date.now()+'',name,type,amt,date:$('fDate').value,rep:$('fRep').value,acc:$('fAcc').value};
+  const note=$('fNote').value.trim();if(note)b.note=note;
+  if(periodM[b.rep]&&type!=='emi'&&type!=='chit'){b.saveTo=$('fSave').value;const sp=$('fSpace').value.trim();if(b.saveTo==='n26space'&&sp)b.space=sp}
+  if(type==='emi'){
+    if(b.rep==='none')b.rep='monthly';
+    const owed=parseFloat($('fLeft').value),end=$('fEnd').value;
+    if(isNaN(owed)&&!end){toast('Enter the amount still owed or the end date');$('fLeft').focus();return}
+    if(end&&end<b.date){toast('End date is before the next due date');$('fEnd').focus();return}
+    b.owed=isNaN(owed)?r2(amt*countUntil(b.date,b.rep,end)):r2(owed);
+    if(end)b.endDate=end;
+    const o=parseFloat($('fTot').value);if(o)b.orig=r2(o);
+  }
+  if(type==='chit'){
+    if(b.rep==='none')b.rep='monthly';
+    const m=parseInt($('fMonths').value);
+    if(!m||m<1){toast('Enter how many months are left');$('fMonths').focus();return}
+    b.monthsLeft=m;
+  }
+  state.bills.push(b);save();render();toast(`${name} added`);
+  $('fName').value='';$('fAmt').value='';$('fLeft').value='';$('fMonths').value='';$('fNote').value='';$('fSpace').value='';syncSave();$('fEnd').value='';$('fTot').value='';$('fName').focus();
+});
+function saveItem(t){
+  const b=t.parent,p=t.plan,[cls,txt]=status(daysUntil(t.date));
+  const li=document.createElement('li');li.className='item save';li.style.setProperty('--c',`var(--c-${b.type})`);
+  li.innerHTML=`<div class="name"></div><div class="amt">${eur(t.amt)}</div>
+    <div class="meta"><span class="pill ${cls}">${txt}</span><span>${de(t.date)}</span><span>· move to ${placeOf(b)}</span></div>
+    <div class="actions">${p.n>1?'<button class="ghost" data-a="skip">Skip this month</button>':''}<button data-a="saved">Saved ✓</button></div>
+    <div class="emi"><div class="row"><span>Saved <b>${eur(p.saved)}</b> of ${eur(b.amt)}</span><span>${p.n} saving${p.n===1?'':'s'} left before ${de(b.date)}</span></div></div>`;
+  li.querySelector('.name').textContent='Save for '+b.name;
+  const sk=li.querySelector('[data-a=skip]');
+  if(sk)sk.onclick=()=>{b.saveNext=nextFirst(t.date);save();render();const np=savePlan(b);toast(`Skipped · next saving ${eur(np.amt)} on ${de(np.next)}`)};
+  li.querySelector('[data-a=saved]').onclick=()=>{
+    b.saved=r2((b.saved||0)+t.amt);b.saveNext=nextFirst(t.date);
+    (b.saveLog=b.saveLog||[]).push({k:'save',d:t.date,a:t.amt,on:iso(today())});save();render();
+    toast(b.saved>=b.amt-0.005?`${b.name} fully saved ✓`:`Saved ${eur(t.amt)} · ${eur(b.saved)} of ${eur(b.amt)}`)};
+  return li;
+}
+function back(s,rep){
+  const d=parse(s),day=d.getDate();
+  if(rep==='weekly'){d.setDate(d.getDate()-7);return iso(d)}
+  const m={monthly:1,quarterly:3,yearly:12}[rep];if(!m)return null;
+  const t=new Date(d.getFullYear(),d.getMonth()-m,1),last=new Date(t.getFullYear(),t.getMonth()+1,0).getDate();
+  t.setDate(Math.min(day,last));return iso(t);
+}
+const COLS=[['emi','EMIs'],['chit','Chitti'],['ins','Insurance'],['sub','Subs'],['bill','Bills']];
+function renderSummary(){
+  const t=today(),months=[];
+  for(let i=0;i<12;i++)months.push(iso(new Date(t.getFullYear(),t.getMonth()+i,1)).slice(0,7));
+  const cur=months[0],last=months[11],rows={};
+  months.forEach(m=>rows[m]={emi:0,chit:0,ins:0,sub:0,bill:0,ends:[]});
+  const add=(d,type,a)=>{const m=ym(d)<cur?cur:ym(d);if(rows[m])rows[m][type]+=a};
+  state.bills.forEach(b=>{
+    const p=savePlan(b);
+    if(p){ // set-aside items: count the monthly saving, the lump payment comes out of the saved money
+      (b.saveLog||[]).forEach(e=>{if(e.k==='save'&&ym(e.d)===cur)add(e.d,b.type,e.a)});
+      if(p.remain>0.005){let d=p.next,g=0;while(d<=b.date&&g++<24){add(d,b.type,p.amt);d=nextFirst(d)}}
+      const st=r2(b.amt/periodM[b.rep]);let d=nextFirst(b.date),g=0;
+      while(ym(d)<=last&&g++<24){add(d,b.type,st);d=nextFirst(d)}
+      return;
+    }
+    // a payment made earlier this month (its date has already moved on)
+    if(b.rep!=='none'){let pd=back(b.date,b.rep),g=0;while(pd&&ym(pd)===cur&&pd<iso(t)&&g++<6){add(pd,b.type,b.amt);pd=back(pd,b.rep)}}
+    let owed=isLoan(b)?b.owed:Infinity,cnt=isChit(b)?b.monthsLeft:Infinity,d=b.date,g=0,lastPay=null;
+    while(ym(d)<=last&&owed>0.005&&cnt>0&&g++<400){const a=Math.min(b.amt,owed);add(d,b.type,a);owed=r2(owed-a);cnt--;lastPay=d;if(b.rep==='none')break;d=advance(d,b.rep)}
+    if((isLoan(b)||isChit(b))&&lastPay&&(owed<=0.005||cnt<=0)){const m=ym(lastPay)<cur?cur:ym(lastPay);if(rows[m])rows[m].ends.push(`${b.name} ends, +${eur(b.amt)}/mo after`)}
+  });
+  const sal=+state.salary||0;
+  const used=COLS.filter(([k])=>months.some(m=>rows[m][k]>0.005));
+  let totOut=0,totLeft=0;
+  const body=months.map((m,i)=>{
+    const r=rows[m],out=used.reduce((s,[k])=>s+r[k],0),left=sal-out;totOut+=out;totLeft+=left;
+    const label=new Date(m+'-01T00:00').toLocaleDateString('en-GB',{month:'short',year:'numeric'});
+    return `<tr${i===0?' class="now"':''}><td>${label}${i===0?' <span class="chip">now</span>':''}</td>${sal?`<td>${eur(sal)}</td>`:''}`+
+      used.map(([k])=>`<td class="${r[k]>0.005?'':'zero'}">${r[k]>0.005?eur(r[k]):'–'}</td>`).join('')+
+      `<td class="left${sal&&left<0?' neg':''}">${sal?eur(left):eur(out)}</td><td class="nt">${r.ends.map(esc).join('<br>')}</td></tr>`;
+  }).join('');
+  const head=`<thead><tr><th>Month</th>${sal?'<th>Salary</th>':''}${used.map(([k,l])=>`<th><i class="dot" style="background:var(--c-${k})"></i>${l}</th>`).join('')}<th>${sal?'Left':'Total out'}</th><th style="text-align:left">Changes</th></tr></thead>`;
+  const foot=`<tfoot><tr><td>12 months</td>${sal?`<td>${eur(sal*12)}</td>`:''}${used.map(([k])=>`<td>${eur(months.reduce((s,m)=>s+rows[m][k],0))}</td>`).join('')}<td class="left${sal&&totLeft<0?' neg':''}">${sal?eur(totLeft):eur(totOut)}</td><td></td></tr></tfoot>`;
+  $('sumTable').innerHTML=head+'<tbody>'+body+'</tbody>'+foot;
+  $('sumNote').textContent=(sal?`If you keep these payments, you have about ${eur(totLeft)} left over the next 12 months. `:'Add your salary to see what is left each month. ')+
+    'Insurance and other set-aside items count the monthly saving, not the big payment. Debts are not included.';
+}
+function renderFreed(){
+  const el=$('freed');el.innerHTML='';
+  state.freed.forEach(f=>{
+    const c=document.createElement('div');c.className='card freed';
+    c.innerHTML=`<p>🎉 <strong></strong> is finished. From ${monYr(f.from)} you have <b>${eur(f.amt)}</b> more every month. Move it to savings, for example an N26 Space, before it gets spent.</p><button class="ghost" type="button">Got it</button>`;
+    c.querySelector('strong').textContent=f.name;
+    c.querySelector('button').onclick=()=>{state.freed=state.freed.filter(x=>x!==f);save();render()};
+    el.appendChild(c);
+  });
+}
+// an EMI or chitti is finished: remove it and remember the money that is now free
+function finish(b){
+  state.bills=state.bills.filter(x=>x!==b);
+  if(!b.example)state.freed.push({id:Date.now()+'f',name:b.name,amt:b.amt,type:b.type,from:nextFirst(b.date)});
+}
+const opt=(map,v)=>Object.entries(map).map(([k,l])=>`<option value="${k}"${k===v?' selected':''}>${l}</option>`).join('');
+function billEditor(b){
+  const emi=b.type==='emi',chit=b.type==='chit',canSave=!emi&&!chit;
+  const reps=emi||chit?{weekly:'Weekly',monthly:'Monthly',quarterly:'Quarterly',yearly:'Yearly'}:repLabel;
+  return `<div class="editbox" hidden>
+    <label class="wide">Name<input data-e="name" value="${esc(b.name)}"></label>
+    <label>${emi?'Monthly payment':'Amount'} (€)<input data-e="amt" type="number" step="0.01" min="0" value="${b.amt}"></label>
+    <label>Next due date<input data-e="date" type="date" value="${b.date}"></label>
+    <label>Pays from<select data-e="acc">${opt(ACC,b.acc)}</select></label>
+    <label>Repeats<select data-e="rep">${opt(reps,b.rep)}</select></label>
+    ${emi?`<label>Still owed (€)<input data-e="owed" type="number" step="0.01" min="0" value="${b.owed??''}"></label>
+      <label>End date (optional)<input data-e="end" type="date" value="${b.endDate||''}"></label>
+      <label>Original loan (€, optional)<input data-e="orig" type="number" step="0.01" min="0" value="${b.orig??''}"></label>`:''}
+    ${chit?`<label>Months left<input data-e="months" type="number" step="1" min="0" value="${b.monthsLeft}"></label>`:''}
+    ${canSave?`<label>Set aside in <small>(quarterly/yearly)</small><select data-e="saveTo">${opt({n26space:'N26 Space',cb:'Commerzbank',n26:'N26 main',cash:'Cash','':"Don't set aside"},b.saveTo??'n26space')}</select></label>
+      <label>Space name<input data-e="space" maxlength="40" value="${esc(b.space||'')}"></label>`:''}
+    <label class="full">Description<input data-e="note" maxlength="200" value="${esc(b.note||'')}"></label>
+    <div class="full actions"><button class="ghost" data-a="cancel" type="button">Cancel</button><button class="primary" data-a="saveEdit" type="button">Save changes</button></div>
+  </div>`;
+}
+function wireBillEditor(li,b){
+  const box=li.querySelector('.editbox'),v=k=>{const el=box.querySelector(`[data-e="${k}"]`);return el?el.value:null};
+  li.querySelector('[data-a=edit]').onclick=()=>{box.hidden=!box.hidden;if(!box.hidden)box.querySelector('input').focus()};
+  box.querySelector('[data-a=cancel]').onclick=()=>{box.hidden=true};
+  box.querySelector('[data-a=saveEdit]').onclick=()=>{
+    const amt=parseFloat(v('amt'));
+    if(!(amt>0)){toast('Enter an amount above 0');return}
+    if(!v('date')){toast('Pick the next due date');return}
+    b.name=v('name').trim()||b.name;b.amt=r2(amt);b.date=v('date');b.acc=v('acc');b.rep=v('rep');
+    const note=v('note').trim();if(note)b.note=note;else delete b.note;
+    if(b.type==='emi'){
+      const end=v('end');if(end)b.endDate=end;else delete b.endDate;
+      const o=parseFloat(v('orig'));if(o>0)b.orig=r2(o);else delete b.orig;
+      const owed=parseFloat(v('owed'));
+      if(owed<=0){finish(b);save();render();toast(`${b.name} marked as paid off`);return}
+      if(owed>0)b.owed=r2(owed);else if(end)b.owed=r2(b.amt*countUntil(b.date,b.rep,end));
+    }
+    if(b.type==='chit'){
+      const m=parseInt(v('months'));
+      if(m===0){finish(b);save();render();toast(`${b.name} marked as complete`);return}
+      if(m>0)b.monthsLeft=m;
+    }
+    if(v('saveTo')!==null){
+      b.saveTo=v('saveTo');const sp=v('space').trim();
+      if(b.saveTo==='n26space'&&sp)b.space=sp;else delete b.space;
+    }
+    save();render();toast(`${b.name} updated`);
+  };
+}
+function addNote(li,text){if(!text)return;const n=document.createElement('div');n.className='note';n.textContent=text;li.querySelector('.actions').after(n)}
+function renderDebts(){
+  const D=state.debts;
+  const owe=D.filter(d=>d.dir==='owe').reduce((s,d)=>s+d.amt,0),owed=D.filter(d=>d.dir==='owed').reduce((s,d)=>s+d.amt,0);
+  $('debtSum').innerHTML=`<div class="stat"><b class="owe">${eur(owe)}</b><span class="eyebrow">I owe</span></div><div class="stat"><b class="owed">${eur(owed)}</b><span class="eyebrow">Owed to me</span></div>`;
+  const ul=$('debtList');ul.innerHTML='';
+  if(!D.length){ul.innerHTML='<li class="empty">No debts. Add money you borrowed or lent above.</li>';return}
+  [...D].sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')).forEach(d=>{
+    const li=document.createElement('li');li.className='item';li.style.setProperty('--c',d.dir==='owe'?'var(--over)':'var(--ok)');
+    let due='';
+    if(d.due){const [cls,txt]=status(daysUntil(d.due));due=`<span class="pill ${cls}">${txt}</span><span>by ${de(d.due)}</span>`}
+    li.innerHTML=`<div class="name"></div><div class="amt">${eur(d.amt)}</div>
+      <div class="meta"><span>${d.dir==='owe'?'I owe':'Owes me'}</span>${due}</div>
+      <div class="actions"><button class="ghost" data-a="edit">Edit</button><button class="ghost" data-a="part">Part paid</button><button data-a="done">Settled</button></div>
+      <div class="fix" hidden><label>Amount paid back (€)<input type="number" step="0.01" min="0.01"></label><button class="primary" data-a="save">Save</button></div>
+      <div class="editbox" hidden>
+        <label class="wide">Person / what for<input data-e="name" value="${esc(d.name)}"></label>
+        <label>Direction<select data-e="dir">${opt({owe:'I owe them',owed:'They owe me'},d.dir)}</select></label>
+        <label>Amount left (€)<input data-e="amt" type="number" step="0.01" min="0" value="${d.amt}"></label>
+        <label>Pay back by<input data-e="due" type="date" value="${d.due||''}"></label>
+        <label class="full">Description<input data-e="note" maxlength="200" value="${esc(d.note||'')}"></label>
+        <div class="full actions"><button class="ghost" data-a="cancel" type="button">Cancel</button><button class="primary" data-a="saveEdit" type="button">Save changes</button></div>
+      </div>`;
+    li.querySelector('.name').textContent=d.name;
+    addNote(li,d.note);
+    const box=li.querySelector('.editbox'),v=k=>box.querySelector(`[data-e="${k}"]`).value;
+    li.querySelector('[data-a=edit]').onclick=()=>{box.hidden=!box.hidden;if(!box.hidden)box.querySelector('input').focus()};
+    box.querySelector('[data-a=cancel]').onclick=()=>{box.hidden=true};
+    box.querySelector('[data-a=saveEdit]').onclick=()=>{
+      const a=parseFloat(v('amt'));if(!(a>=0)){toast('Enter the amount left');return}
+      if(a===0){state.debts=state.debts.filter(x=>x!==d);save();render();toast(`${d.name} settled`);return}
+      d.name=v('name').trim()||d.name;d.dir=v('dir');d.amt=r2(a);
+      if(v('due'))d.due=v('due');else delete d.due;
+      const n=v('note').trim();if(n)d.note=n;else delete d.note;
+      save();render();toast(`${d.name} updated`)};
+    li.querySelector('[data-a=part]').onclick=()=>{const f=li.querySelector('.fix');f.hidden=!f.hidden;if(!f.hidden)f.querySelector('input').focus()};
+    li.querySelector('[data-a=save]').onclick=()=>{const v=parseFloat(li.querySelector('.fix input').value);if(!v)return;
+      d.amt=r2(d.amt-v);if(d.amt<=0.005){state.debts=state.debts.filter(x=>x!==d);toast(`${d.name} settled`)}else toast(`${eur(v)} recorded · ${eur(d.amt)} left`);save();render()};
+    li.querySelector('[data-a=done]').onclick=()=>{state.debts=state.debts.filter(x=>x!==d);save();render();toast(`${d.name} settled`)};
+    ul.appendChild(li);
+  });
+}
+$('debtForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=$('dName').value.trim(),amt=parseFloat($('dAmt').value);if(!name||!amt)return;
+  const d={id:Date.now()+'d',name,dir:$('dDir').value,amt:r2(amt)};if($('dDue').value)d.due=$('dDue').value;
+  const dn=$('dNote').value.trim();if(dn)d.note=dn;
+  state.debts.push(d);save();render();toast(`${name} added`);
+  $('dName').value='';$('dAmt').value='';$('dDue').value='';$('dNote').value='';$('dName').focus();
+});
+$('clearEx').onclick=()=>{state.debts=state.debts.filter(d=>!d.example);state.bills=state.bills.filter(b=>!b.example);if(state.salaryExample){state.salary=0;state.salaryExample=false}save();render();toast('Examples cleared')};
+document.querySelectorAll('.tabs button').forEach(btn=>btn.onclick=()=>{
+  filter=btn.dataset.f;document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-pressed',x===btn));render()});
+render();
+sync('local');
+(async()=>{
+  let db=null;
+  try{db=window.claude&&window.claude.use?await window.claude.use('db'):null}catch(e){}
+  if(!db){sync('local');return}
+  docRef=db.doc('finance/state');
+  let first=true;const t=setTimeout(()=>sync('wait'),10000);
+  docRef.onSnapshot(snap=>{
+    if(!snap.metadata.fromCache)clearTimeout(t);
+    if(!snap.exists){
+      if(!snap.metadata.fromCache&&first){first=false;if(fromLocal||dirty)flush();else sync('ok')}
+      return;
+    }
+    first=false;
+    if(snap.metadata.hasPendingWrites||dirty)return;
+    const s=JSON.stringify(snap.data());
+    if(s===lastJSON){sync('ok');return}
+    const ns=normalize(JSON.parse(s));if(!ns)return;
+    lastJSON=s;state=ns;persistLocal();render();sync('ok');
+  },e=>{clearTimeout(t);sync('err')});
+})();
+</script>
+
+</body></html>
