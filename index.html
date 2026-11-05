@@ -23,6 +23,7 @@
   --c-emi:#b58cf2; --c-sub:#7d97ff; --c-bill:#4fc9c4; --c-chit:#f0a15a; --c-ins:#f08cb8; --c-free:#2f3a4a;
   --over:#ff8a80; --over-bg:#3a1c1c; --soon:#f3bd5a; --soon-bg:#3a2c12; --ok:#6fd39f; --ok-bg:#15301f; color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:15px;line-height:1.5;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:28px 56px}
 .wrap{max-width:700px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
@@ -120,6 +121,12 @@ h2 small{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
 .sumtable tfoot td{border-bottom:0;border-top:2px solid var(--line);font-weight:600}
 .sumtable .dot{margin-right:5px;vertical-align:baseline}
 .sumnote{margin:10px 0 0;color:var(--muted);font-size:.85rem}
+.backup .actions{margin-top:10px}
+.filebtn{flex-direction:row;font:inherit;font-weight:600;font-size:.82rem;text-transform:none;letter-spacing:0;color:var(--fg);cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:5px 10px;background:var(--surface)}
+.filebtn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.filebtn:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.confirm{margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--soon-bg);color:var(--fg)}
+.confirm p{margin:0 0 8px}
 .fix{grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap}
 .fix{align-items:end}
 .fix label{flex:0 1 170px}
@@ -230,6 +237,19 @@ h2 small{font-family:var(--mono);font-size:.8rem;color:var(--muted)}
       </form>
     </div>
     <ul class="list" id="debtList"></ul>
+  </section>
+
+  <section class="card backup" aria-labelledby="bkH">
+    <h2 id="bkH">Backup</h2>
+    <p class="sumnote">Save all your payments, debts and salary as one file, or load a backup file to restore everything.</p>
+    <div class="actions" style="justify-content:flex-start">
+      <button id="expBtn" type="button">Export backup</button>
+      <label class="filebtn" for="impFile">Import backup<input id="impFile" type="file" accept=".json,application/json"></label>
+    </div>
+    <div class="confirm" id="impConfirm" hidden>
+      <p id="impMsg"></p>
+      <div class="actions" style="justify-content:flex-start"><button class="primary" id="impYes" type="button">Replace with backup</button><button class="ghost" id="impNo" type="button">Cancel</button></div>
+    </div>
   </section>
 </div>
 <div class="toast" id="toast" hidden></div>
@@ -608,8 +628,8 @@ function billEditor(b){
       <label>End date (optional)<input data-e="end" type="date" value="${b.endDate||''}"></label>
       <label>Original loan (€, optional)<input data-e="orig" type="number" step="0.01" min="0" value="${b.orig??''}"></label>`:''}
     ${chit?`<label>Months left<input data-e="months" type="number" step="1" min="0" value="${b.monthsLeft}"></label>`:''}
-    ${canSave?`<label>Set aside in <small>(quarterly/yearly)</small><select data-e="saveTo">${opt({n26space:'N26 Space',cb:'Commerzbank',n26:'N26 main',cash:'Cash','':"Don't set aside"},b.saveTo??'n26space')}</select></label>
-      <label>Space name<input data-e="space" maxlength="40" value="${esc(b.space||'')}"></label>`:''}
+    ${canSave?`<label data-only="period"${periodM[b.rep]?'':' hidden'}>Set aside in<select data-e="saveTo">${opt({n26space:'N26 Space',cb:'Commerzbank',n26:'N26 main',cash:'Cash','':"Don't set aside"},b.saveTo??'n26space')}</select></label>
+      <label data-only="space"${periodM[b.rep]&&(b.saveTo??'n26space')==='n26space'?'':' hidden'}>Space name<input data-e="space" maxlength="40" value="${esc(b.space||'')}"></label>`:''}
     <label class="full">Description<input data-e="note" maxlength="200" value="${esc(b.note||'')}"></label>
     <div class="full actions"><button class="ghost" data-a="cancel" type="button">Cancel</button><button class="primary" data-a="saveEdit" type="button">Save changes</button></div>
   </div>`;
@@ -618,6 +638,10 @@ function wireBillEditor(li,b){
   const box=li.querySelector('.editbox'),v=k=>{const el=box.querySelector(`[data-e="${k}"]`);return el?el.value:null};
   li.querySelector('[data-a=edit]').onclick=()=>{box.hidden=!box.hidden;if(!box.hidden)box.querySelector('input').focus()};
   box.querySelector('[data-a=cancel]').onclick=()=>{box.hidden=true};
+  const per=box.querySelector('[data-only=period]'),spc=box.querySelector('[data-only=space]');
+  const syncEd=()=>{if(!per)return;const p=!!periodM[v('rep')];per.hidden=!p;spc.hidden=!p||v('saveTo')!=='n26space'};
+  box.querySelector('[data-e=rep]').addEventListener('change',syncEd);
+  const st=box.querySelector('[data-e=saveTo]');if(st)st.addEventListener('change',syncEd);
   box.querySelector('[data-a=saveEdit]').onclick=()=>{
     const amt=parseFloat(v('amt'));
     if(!(amt>0)){toast('Enter an amount above 0');return}
@@ -636,7 +660,7 @@ function wireBillEditor(li,b){
       if(m===0){finish(b);save();render();toast(`${b.name} marked as complete`);return}
       if(m>0)b.monthsLeft=m;
     }
-    if(v('saveTo')!==null){
+    if(v('saveTo')!==null&&periodM[b.rep]){
       b.saveTo=v('saveTo');const sp=v('space').trim();
       if(b.saveTo==='n26space'&&sp)b.space=sp;else delete b.space;
     }
@@ -696,6 +720,33 @@ $('debtForm').addEventListener('submit',e=>{
 $('clearEx').onclick=()=>{state.debts=state.debts.filter(d=>!d.example);state.bills=state.bills.filter(b=>!b.example);if(state.salaryExample){state.salary=0;state.salaryExample=false}save();render();toast('Examples cleared')};
 document.querySelectorAll('.tabs button').forEach(btn=>btn.onclick=()=>{
   filter=btn.dataset.f;document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-pressed',x===btn));render()});
+// backup export / import
+$('expBtn').onclick=async()=>{
+  const name=`bill-radar-backup-${iso(today())}.json`;
+  const data=JSON.stringify({app:'bill-radar',version:1,exported:iso(today()),data:state},null,2);
+  let dl=null;try{dl=window.claude&&window.claude.use?await window.claude.use('downloads'):null}catch(e){}
+  if(dl){
+    try{await dl.save({filename:name,data});toast('Backup saved')}
+    catch(e){toast(e&&e.code==='declined'?'Backup not saved':"Couldn't save the backup here")}
+    return;
+  }
+  // opened as a local file: a normal browser download
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+  a.download=name;document.body.appendChild(a);a.click();a.remove();toast('Backup downloaded');
+};
+let pendingImport=null;
+$('impFile').addEventListener('change',async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  try{
+    const j=JSON.parse(await f.text()),d=normalize(j&&j.data?j.data:j);
+    if(!d)throw new Error('not a backup');
+    pendingImport=d;
+    $('impMsg').textContent=`${f.name}: ${d.bills.length} payments and ${d.debts.length} debts. This replaces everything shown now.`;
+    $('impConfirm').hidden=false;
+  }catch(err){toast("That file isn't a Bill Radar backup")}
+});
+$('impYes').onclick=()=>{if(!pendingImport)return;state=pendingImport;pendingImport=null;$('impConfirm').hidden=true;save();render();toast('Backup imported')};
+$('impNo').onclick=()=>{pendingImport=null;$('impConfirm').hidden=true};
 render();
 sync('local');
 (async()=>{
