@@ -82,6 +82,7 @@ class Notifier {
   /// Cancels all reminders and schedules the upcoming ones. Returns how many.
   static Future<int> reschedule(AppState s) async {
     await init();
+    cycleDay = s.cycleDay;
     await _plugin.cancelAll();
     if (!enabled) return 0;
     final list = plan(s);
@@ -159,9 +160,8 @@ class Notifier {
           overdue.map((b) => b.name).join(', '));
     }
 
-    // transfer reminder on the 1st of next month
-    final t = todayD();
-    final first = iso(DateTime.utc(t.year, t.month + 1, 1));
+    // transfer reminder on the first day of your next month (rent / salary day)
+    final first = nextPeriod().$1;
     final totals = accountTotals(s);
     for (final k in ['cb', 'n26']) {
       if (k == s.salaryAcc) continue;

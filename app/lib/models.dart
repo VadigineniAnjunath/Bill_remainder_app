@@ -172,19 +172,106 @@ class Freed {
   Map<String, dynamic> toJson() => {'id': id, 'name': name, 'amt': amt, 'type': type, 'from': from};
 }
 
+/// One "Paid" tap: what was paid, when, and the payment as it was before
+/// (so the tap can be undone exactly).
+class PaidEntry {
+  String id;
+  String billId;
+  String name;
+  String type;
+  String acc;
+  double amt;
+  String due; // the due date that was paid
+  String on; // the day "Paid" was tapped
+  Map<String, dynamic> before; // the payment before it was marked paid
+
+  PaidEntry({
+    required this.id,
+    required this.billId,
+    required this.name,
+    required this.type,
+    required this.acc,
+    required this.amt,
+    required this.due,
+    required this.on,
+    required this.before,
+  });
+
+  factory PaidEntry.fromJson(Map<String, dynamic> j) => PaidEntry(
+        id: (j['id'] ?? '').toString(),
+        billId: (j['billId'] ?? '').toString(),
+        name: (j['name'] ?? '').toString(),
+        type: (j['type'] ?? 'bill').toString(),
+        acc: (j['acc'] ?? 'cb').toString(),
+        amt: _d(j['amt']),
+        due: j['due'].toString(),
+        on: j['on'].toString(),
+        before: Map<String, dynamic>.from((j['before'] as Map?) ?? {}),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'billId': billId,
+        'name': name,
+        'type': type,
+        'acc': acc,
+        'amt': amt,
+        'due': due,
+        'on': on,
+        'before': before,
+      };
+}
+
+/// Day-to-day spending (groceries, eating out, shopping …).
+class Spend {
+  String id;
+  String date;
+  double amt;
+  String cat;
+  String acc;
+  String? note;
+
+  Spend({required this.id, required this.date, required this.amt, required this.cat, this.acc = 'cb', this.note});
+
+  factory Spend.fromJson(Map<String, dynamic> j) => Spend(
+        id: (j['id'] ?? '').toString(),
+        date: j['date'].toString(),
+        amt: _d(j['amt']),
+        cat: (j['cat'] ?? 'other').toString(),
+        acc: (j['acc'] ?? 'cb').toString(),
+        note: _sn(j['note']),
+      );
+
+  Map<String, dynamic> toJson() => _clean({'id': id, 'date': date, 'amt': amt, 'cat': cat, 'acc': acc, 'note': note});
+}
+
 /// Everything the app stores.
 class AppState {
   double salary;
   String salaryAcc;
   bool salaryExample;
+  int cycleDay; // the day your month starts (rent + salary), e.g. 30
   List<Bill> bills;
   List<Debt> debts;
   List<Freed> freed;
+  List<PaidEntry> paid;
+  List<Spend> spends;
 
-  AppState({this.salary = 0, this.salaryAcc = 'cb', this.salaryExample = false, List<Bill>? bills, List<Debt>? debts, List<Freed>? freed})
-      : bills = bills ?? [],
+  AppState({
+    this.salary = 0,
+    this.salaryAcc = 'cb',
+    this.salaryExample = false,
+    this.cycleDay = 30,
+    List<Bill>? bills,
+    List<Debt>? debts,
+    List<Freed>? freed,
+    List<PaidEntry>? paid,
+    List<Spend>? spends,
+  })  : bills = bills ?? [],
         debts = debts ?? [],
-        freed = freed ?? [];
+        freed = freed ?? [],
+        paid = paid ?? [],
+        spends = spends ?? [];
 
   factory AppState.empty() => AppState();
 
@@ -195,17 +282,23 @@ class AppState {
         salary: _d(j['salary']),
         salaryAcc: (j['salaryAcc'] ?? 'cb').toString(),
         salaryExample: j['salaryExample'] == true,
+        cycleDay: _in(j['cycleDay']) ?? 30,
         bills: _list(j['bills'], Bill.fromJson),
         debts: _list(j['debts'], Debt.fromJson),
         freed: _list(j['freed'], Freed.fromJson),
+        paid: _list(j['paid'], PaidEntry.fromJson),
+        spends: _list(j['spends'], Spend.fromJson),
       );
 
   Map<String, dynamic> toJson() => {
         'salary': salary,
         'salaryAcc': salaryAcc,
         'salaryExample': salaryExample,
+        'cycleDay': cycleDay,
         'bills': bills.map((b) => b.toJson()).toList(),
         'debts': debts.map((d) => d.toJson()).toList(),
         'freed': freed.map((f) => f.toJson()).toList(),
+        'paid': paid.map((p) => p.toJson()).toList(),
+        'spends': spends.map((x) => x.toJson()).toList(),
       };
 }

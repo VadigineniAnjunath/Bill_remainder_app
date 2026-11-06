@@ -66,16 +66,49 @@ String firstOfThisMonth() {
   return iso(DateTime.utc(t.year, t.month, 1));
 }
 
-String endOfThisMonth() {
-  final t = todayD();
-  return iso(DateTime.utc(t.year, t.month + 1, 0));
+// ---------- your month: from the rent/salary day to the day before the next one ----------
+/// The day your month starts (set from the saved data). 30 = 30th → 29th.
+int cycleDay = 30;
+
+DateTime _startIn(int y, int m) {
+  final first = DateTime.utc(y, m, 1); // normalises month 0 / 13
+  final last = DateTime.utc(first.year, first.month + 1, 0).day;
+  return DateTime.utc(first.year, first.month, min(cycleDay, last));
 }
+
+/// (start, end) of the month that contains [day].
+(String, String) periodOf(String day) {
+  final d = parseD(day);
+  var s = _startIn(d.year, d.month);
+  if (d.isBefore(s)) s = _startIn(d.year, d.month - 1);
+  final ns = _startIn(s.year, s.month + 1);
+  return (iso(s), iso(ns.subtract(const Duration(days: 1))));
+}
+
+(String, String) currentPeriod() => periodOf(todayS());
+
+(String, String) periodAfter((String, String) p) =>
+    periodOf(iso(parseD(p.$2).add(const Duration(days: 1))));
+
+(String, String) nextPeriod() => periodAfter(currentPeriod());
+
+/// Name of the month a day belongs to, as yyyy-mm of the month it ends in
+/// (30 Oct – 29 Nov is "2026-11").
+String periodKey(String day) => ym(periodOf(day).$2);
+
+String periodRange((String, String) p) {
+  final f = DateFormat('d MMM');
+  return '${f.format(parseD(p.$1))} – ${f.format(parseD(p.$2))}';
+}
+
+/// Last day of your current month (e.g. 29 Nov).
+String endOfThisMonth() => currentPeriod().$2;
 
 /// ('over' | 'soon' | 'ok', label) for a number of days until a date.
 (String, String) status(int n) {
   if (n < 0) return ('over', '${-n} day${n == -1 ? '' : 's'} overdue');
   if (n == 0) return ('over', 'Due today');
-  if (n <= 7) return ('soon', 'In $n day${n == 1 ? '' : 's'}');
+  if (n <= 3) return ('soon', 'In $n day${n == 1 ? '' : 's'}');
   return ('ok', 'In $n days');
 }
 
@@ -232,6 +265,130 @@ String pay(AppState s, Bill b) {
   return '${b.name} paid · next ${fmtDate(b.date)}';
 }
 
+/// "Paid" with a record of it, so it shows under "Paid this month" and can be undone.
+String payAndLog(AppState s, Bill b) {
+  final entry = PaidEntry(
+    id: '${DateTime.now().microsecondsSinceEpoch}p',
+    billId: b.id,
+    name: b.name,
+    type: b.type,
+    acc: b.acc,
+    amt: nextAmt(b),
+    due: b.date,
+    on: todayS(),
+    before: b.toJson(),
+  );
+  final msg = pay(s, b);
+  s.paid.add(entry);
+  return msg;
+}
+
+/// Undo is only possible for the most recent payment of an item.
+bool canUndo(AppState s, PaidEntry e) => e.before.isNotEmpty && s.paid.lastWhere((p) => p.billId == e.billId) == e;
+
+String undoPaid(AppState s, PaidEntry e) {
+  final restored = Bill.fromJson(e.before);
+  final i = s.bills.indexWhere((x) => x.id == e.billId);
+  if (i >= 0) {
+    s.bills[i] = restored;
+  } else {
+    // it had finished and was removed: bring it back
+    s.bills.add(restored);
+    final f = s.freed.where((x) => x.name == e.name).toList();
+    if (f.isNotEmpty) s.freed.remove(f.last);
+  }
+  s.paid.remove(e);
+  return '${e.name} is pending again';
+}
+
+/// Once: record payments made this month before the app tracked Paid taps
+/// (the previous due date is in this month and the date has already moved on).
+int backfillPaid(AppState s) {
+  final cur = currentPeriod();
+  var n = 0;
+  for (final b in s.bills) {
+    if (b.rep == 'none' || savePlan(b) != null) continue;
+    var pd = back(b.date, b.rep);
+    var g = 0;
+    while (pd != null && pd.compareTo(cur.$1) >= 0 && g++ < 6) {
+      final d = pd;
+      if (!s.paid.any((e) => e.billId == b.id && e.due == d)) {
+        s.paid.add(PaidEntry(
+          id: '${b.id}-$d',
+          billId: b.id,
+          name: b.name,
+          type: b.type,
+          acc: b.acc,
+          amt: b.amt,
+          due: d,
+          on: d,
+          before: {},
+        ));
+        n++;
+      }
+      pd = back(pd, b.rep);
+    }
+  }
+  if (n > 0) s.paid.sort((a, b) => a.on.compareTo(b.on));
+  return n;
+}
+
+// ---------- spending ----------
+const spendCats = {
+  'food': '🛒 Groceries',
+  'eat': '🍽 Eating out',
+  'shop': '🛍 Shopping',
+  'travel': '🚆 Transport',
+  'fun': '🎬 Fun',
+  'family': '🎁 Family & gifts',
+  'other': '📦 Other',
+};
+
+bool inPeriod(String day, (String, String) p) => day.compareTo(p.$1) >= 0 && day.compareTo(p.$2) <= 0;
+
+double spentIn(AppState s, (String, String) p) =>
+    s.spends.where((x) => inPeriod(x.date, p)).fold<double>(0.0, (t, x) => t + x.amt);
+
+/// One payment (or monthly saving) on one day.
+class Occ {
+  final Bill bill;
+  final String date;
+  final double amt;
+  final bool saving;
+  const Occ(this.bill, this.date, this.amt, {this.saving = false});
+}
+
+/// Every payment and saving due between [from] and [to] (inclusive).
+List<Occ> occurrencesIn(AppState s, String from, String to) {
+  final out = <Occ>[];
+  for (final b in s.bills) {
+    var d = b.date;
+    var owed = isLoan(b) ? b.owed! : double.infinity;
+    var cnt = isChit(b) ? b.monthsLeft! : 1 << 30;
+    var g = 0;
+    while (d.compareTo(to) <= 0 && owed > 0.005 && cnt > 0 && g++ < 400) {
+      final a = min(b.amt, owed);
+      if (d.compareTo(from) >= 0) out.add(Occ(b, d, a));
+      owed = r2(owed - a);
+      cnt--;
+      if (b.rep == 'none') break;
+      d = advance(d, b.rep);
+    }
+    final p = savePlan(b);
+    if (p != null) {
+      var sd = p.remain > 0.005 ? p.next : nextFirst(b.date);
+      var g2 = 0;
+      while (sd.compareTo(to) <= 0 && g2++ < 40) {
+        final a = sd.compareTo(b.date) <= 0 ? p.amt : r2(b.amt / periodM[b.rep]!);
+        if (sd.compareTo(from) >= 0 && a > 0.005) out.add(Occ(b, sd, a, saving: true));
+        sd = nextFirst(sd);
+      }
+    }
+  }
+  out.sort((a, b) => a.date.compareTo(b.date));
+  return out;
+}
+
 /// "Saved ✓" on a monthly saving reminder.
 String markSaved(Bill b, SavePlan p) {
   b.saved = r2(b.saved + p.amt);
@@ -323,24 +480,26 @@ class MonthRow {
   final String month; // yyyy-mm
   final Map<String, double> by = {'emi': 0, 'chit': 0, 'ins': 0, 'sub': 0, 'bill': 0};
   final List<String> ends = [];
+  String range = ''; // e.g. 30 Oct – 29 Nov
   MonthRow(this.month);
   double get out => by.values.fold(0.0, (double a, double b) => a + b);
 }
 
 List<MonthRow> summaryRows(AppState s) {
-  final t = todayD();
   final today = todayS();
   final months = <String>[];
   final rows = <String, MonthRow>{};
+  var per = currentPeriod();
   for (var i = 0; i < 12; i++) {
-    final m = iso(DateTime.utc(t.year, t.month + i, 1)).substring(0, 7);
+    final m = ym(per.$2);
     months.add(m);
-    rows[m] = MonthRow(m);
+    rows[m] = MonthRow(m)..range = periodRange(per);
+    per = periodAfter(per);
   }
   final cur = months.first;
   final last = months.last;
   void add(String d, String type, double a) {
-    var m = ym(d);
+    var m = periodKey(d);
     if (m.compareTo(cur) < 0) m = cur;
     final r = rows[m];
     if (r != null) r.by[type] = (r.by[type] ?? 0) + a;
@@ -351,7 +510,7 @@ List<MonthRow> summaryRows(AppState s) {
     if (p != null) {
       // set-aside items count the monthly saving, not the big payment
       for (final e in b.saveLog) {
-        if (e.k == 'save' && ym(e.d) == cur) add(e.d, b.type, e.a);
+        if (e.k == 'save' && periodKey(e.on ?? e.d) == cur) add(today, b.type, e.a);
       }
       if (p.remain > 0.005) {
         var d = p.next;
@@ -364,7 +523,7 @@ List<MonthRow> summaryRows(AppState s) {
       final st = r2(b.amt / periodM[b.rep]!);
       var d = nextFirst(b.date);
       var g = 0;
-      while (ym(d).compareTo(last) <= 0 && g++ < 24) {
+      while (periodKey(d).compareTo(last) <= 0 && g++ < 24) {
         add(d, b.type, st);
         d = nextFirst(d);
       }
@@ -374,7 +533,7 @@ List<MonthRow> summaryRows(AppState s) {
     if (b.rep != 'none') {
       var pd = back(b.date, b.rep);
       var g = 0;
-      while (pd != null && ym(pd) == cur && pd.compareTo(today) < 0 && g++ < 6) {
+      while (pd != null && periodKey(pd) == cur && pd.compareTo(today) < 0 && g++ < 6) {
         add(pd, b.type, b.amt);
         pd = back(pd, b.rep);
       }
@@ -384,7 +543,7 @@ List<MonthRow> summaryRows(AppState s) {
     var d = b.date;
     var g = 0;
     String? lastPay;
-    while (ym(d).compareTo(last) <= 0 && owed > 0.005 && cnt > 0 && g++ < 400) {
+    while (periodKey(d).compareTo(last) <= 0 && owed > 0.005 && cnt > 0 && g++ < 400) {
       final a = min(b.amt, owed);
       add(d, b.type, a);
       owed = r2(owed - a);
@@ -394,7 +553,7 @@ List<MonthRow> summaryRows(AppState s) {
       d = advance(d, b.rep);
     }
     if ((isLoan(b) || isChit(b)) && lastPay != null && (owed <= 0.005 || cnt <= 0)) {
-      var m = ym(lastPay);
+      var m = periodKey(lastPay);
       if (m.compareTo(cur) < 0) m = cur;
       rows[m]?.ends.add('${b.name} ends, +${eur(b.amt)}/mo after');
     }

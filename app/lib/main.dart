@@ -1,14 +1,16 @@
-// Bill Radar — Step 4: add, edit, delete, summary, debts, accounts, reminders.
+// Bill Radar — v7: spending tab, Excel report, paid history.
 
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'forms.dart';
 import 'logic.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'report.dart';
 import 'store.dart';
 
 void main() => runApp(const BillRadarApp());
@@ -60,8 +62,21 @@ class _HomePageState extends State<HomePage> {
       }
     }
     if (!mounted) return;
+    cycleDay = (s ?? AppState.empty()).cycleDay;
     setState(() => _s = s ?? AppState.empty());
     if (msg != null) _toast(msg);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (!(prefs.getBool('backfill.v1') ?? false)) {
+        if (backfillPaid(_s!) > 0) {
+          await Store.save(_s!);
+          if (mounted) setState(() {});
+        }
+        await prefs.setBool('backfill.v1', true);
+      }
+    } catch (e) {
+      debugPrint('backfill: $e');
+    }
     try {
       await Notifier.init();
       await Notifier.requestPermission();
@@ -206,11 +221,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _editSalary() async {
-    final r = await askSalary(context, _s!.salary, _s!.salaryAcc);
+    final r = await askSalary(context, _s!.salary, _s!.salaryAcc, _s!.cycleDay);
     if (r == null) return;
     _change(() {
       _s!.salary = r2(r.$1);
       _s!.salaryAcc = r.$2;
+      _s!.cycleDay = r.$3;
+      cycleDay = r.$3;
       _s!.salaryExample = false;
       return 'Salary saved';
     });
@@ -310,6 +327,122 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ---------------- spending + report ----------------
+  Future<void> _addSpend() async {
+    final x = await Navigator.push<Spend>(context, MaterialPageRoute(builder: (_) => const SpendForm()));
+    if (x == null) return;
+    _change(() {
+      _s!.spends.add(x);
+      return '${eur(x.amt)} added to ${spendCats[x.cat] ?? x.cat}';
+    });
+  }
+
+  Future<void> _editSpend(Spend x) async {
+    final nx = await Navigator.push<Spend>(context, MaterialPageRoute(builder: (_) => SpendForm(spend: x)));
+    if (nx == null) return;
+    _change(() {
+      final i = _s!.spends.indexOf(x);
+      if (i < 0) return null;
+      _s!.spends[i] = nx;
+      return 'Spending updated';
+    });
+  }
+
+  Future<void> _deleteSpend(Spend x) async {
+    if (!await askConfirm(context, 'Delete ${eur(x.amt)} (${spendCats[x.cat] ?? x.cat})?', 'Delete')) return;
+    _change(() {
+      _s!.spends.remove(x);
+      return 'Spending deleted';
+    });
+  }
+
+  Future<void> _exportReport() async {
+    try {
+      await shareReport(_s!);
+    } catch (e) {
+      _toast("Couldn't create the report: $e");
+    }
+  }
+
+  Widget _spendingTab(AppState s) {
+    final text = Theme.of(context).textTheme;
+    final cur = currentPeriod();
+    final list = s.spends.where((x) => inPeriod(x.date, cur)).toList()..sort((a, b) => b.date.compareTo(a.date));
+    final total = list.fold<double>(0.0, (t, x) => t + x.amt);
+    final byCat = <String, double>{};
+    for (final x in list) {
+      byCat[x.cat] = (byCat[x.cat] ?? 0) + x.amt;
+    }
+    final cats = byCat.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final earlier = <String, double>{};
+    for (final x in s.spends) {
+      if (x.date.compareTo(cur.$1) < 0) {
+        final k = periodKey(x.date);
+        earlier[k] = (earlier[k] ?? 0) + x.amt;
+      }
+    }
+    final earlierKeys = earlier.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('SPENT THIS MONTH · ${periodRange(cur).toUpperCase()}', style: text.labelSmall),
+                const SizedBox(height: 4),
+                Text(eur(total), style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
+                for (final c in cats) ...[
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Expanded(child: Text(spendCats[c.key] ?? c.key)),
+                    Text(eur(c.value), style: _tabular),
+                  ]),
+                  const SizedBox(height: 4),
+                  _bar([
+                    (c.value / (total > 0 ? total : 1), Colors.purple.shade400),
+                    (1 - c.value / (total > 0 ? total : 1), Theme.of(context).colorScheme.surfaceContainerHighest),
+                  ]),
+                ],
+              ],
+            ),
+          ),
+        ),
+        _section('This month', '${list.length} entr${list.length == 1 ? 'y' : 'ies'}', total),
+        if (list.isEmpty) _emptyNote('Tap Add spending when you buy something: groceries, eating out, shopping …'),
+        for (final x in list)
+          Card(
+            child: ListTile(
+              onTap: () => _editSpend(x),
+              leading: Text((spendCats[x.cat] ?? '📦').split(' ').first, style: const TextStyle(fontSize: 22)),
+              title: Text(x.note ?? (spendCats[x.cat] ?? x.cat).split(' ').skip(1).join(' ')),
+              subtitle: Text('${fmtDate(x.date)} · ${accName[x.acc] ?? x.acc}'),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(eur(x.amt), style: _tabular.copyWith(fontWeight: FontWeight.w600)),
+                IconButton(tooltip: 'Delete', icon: const Icon(Icons.delete_outline), onPressed: () => _deleteSpend(x)),
+              ]),
+            ),
+          ),
+        if (earlierKeys.isNotEmpty) ...[
+          _section('Earlier months', '', earlier.values.fold<double>(0.0, (t, v) => t + v)),
+          Card(
+            child: Column(children: [
+              for (final k in earlierKeys)
+                ListTile(
+                  dense: true,
+                  title: Text(DateFormat('MMMM yyyy').format(DateTime.parse('$k-01'))),
+                  trailing: Text(eur(earlier[k]!), style: _tabular),
+                ),
+            ]),
+          ),
+        ],
+      ],
+    );
+  }
+
   // ---------------- layout ----------------
   @override
   Widget build(BuildContext context) {
@@ -319,12 +452,13 @@ class _HomePageState extends State<HomePage> {
     }
     final body = switch (_tab) {
       0 => _paymentsTab(s),
-      1 => _summaryTab(s),
+      1 => _spendingTab(s),
+      2 => _summaryTab(s),
       _ => _debtsTab(s),
     };
     return Scaffold(
       appBar: AppBar(
-        title: Text(const ['Bill Radar', 'Monthly summary', 'Debts'][_tab]),
+        title: Text(const ['Bill Radar', 'Spending', 'Summary', 'Debts'][_tab]),
         actions: [
           IconButton(
             tooltip: 'Reminders',
@@ -334,18 +468,23 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: body,
-      floatingActionButton: _tab == 1
+      floatingActionButton: _tab == 2
           ? null
           : FloatingActionButton.extended(
-              onPressed: _tab == 0 ? _addBill : _addDebt,
+              onPressed: switch (_tab) {
+                0 => _addBill,
+                1 => _addSpend,
+                _ => _addDebt,
+              },
               icon: const Icon(Icons.add),
-              label: Text(_tab == 0 ? 'Add payment' : 'Add debt'),
+              label: Text(const ['Add payment', 'Add spending', '', 'Add debt'][_tab]),
             ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.receipt_long_outlined), selectedIcon: Icon(Icons.receipt_long), label: 'Payments'),
+          NavigationDestination(icon: Icon(Icons.shopping_bag_outlined), selectedIcon: Icon(Icons.shopping_bag), label: 'Spending'),
           NavigationDestination(icon: Icon(Icons.calendar_month_outlined), selectedIcon: Icon(Icons.calendar_month), label: 'Summary'),
           NavigationDestination(icon: Icon(Icons.handshake_outlined), selectedIcon: Icon(Icons.handshake), label: 'Debts'),
         ],
@@ -355,8 +494,8 @@ class _HomePageState extends State<HomePage> {
 
   Color _kindColor(String kind) => switch (kind) {
         'over' => Theme.of(context).colorScheme.error,
-        'soon' => Colors.orange.shade700,
-        _ => Colors.green.shade600,
+        'soon' => Colors.orange.shade800,
+        _ => Theme.of(context).colorScheme.onSurfaceVariant,
       };
 
   Widget _pill(String kind, String label) {
@@ -378,66 +517,163 @@ class _HomePageState extends State<HomePage> {
       );
 
   // ---------------- Payments tab ----------------
+  bool _showNext = true;
+  bool _showLater = false;
+
+  Widget _section(String title, String sub, double total, {Widget? trailing}) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 20, 4, 6),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+              if (sub.isNotEmpty) Text(sub, style: Theme.of(context).textTheme.bodySmall),
+            ]),
+          ),
+          Text(eur(total), style: _tabular.copyWith(fontWeight: FontWeight.w700)),
+          if (trailing != null) trailing,
+        ]),
+      );
+
   Widget _paymentsTab(AppState s) {
-    final entries = buildEntries(s).where((e) => _filter == 'all' || e.bill.type == _filter).toList();
-    const titles = {'over': 'Overdue & due today', 'soon': 'Next 7 days', 'ok': 'Later'};
+    bool keep(Bill b) => _filter == 'all' || b.type == _filter;
+    final cur = currentPeriod();
+    final nxt = nextPeriod();
     const filters = {'all': 'All', 'sub': 'Subscriptions', 'emi': 'EMIs', 'chit': 'Chitti', 'ins': 'Insurance', 'bill': 'Bills'};
+
+    // coming this month: every unpaid row due up to the end of this month (overdue included)
+    final coming = buildEntries(s).where((e) => keep(e.bill) && e.date.compareTo(cur.$2) <= 0).toList();
+    final comingTotal = occurrencesIn(s, '0000-01-01', cur.$2).where((o) => keep(o.bill)).fold(0.0, (double t, o) => t + o.amt);
+
+    // paid this month
+    final paid = s.paid.where((e) => e.on.compareTo(cur.$1) >= 0 && (_filter == 'all' || e.type == _filter)).toList().reversed.toList();
+    final saves = <(Bill, SaveLogEntry)>[
+      for (final b in s.bills)
+        if (keep(b))
+          for (final e in b.saveLog)
+            if (e.k == 'save' && (e.on ?? e.d).compareTo(cur.$1) >= 0) (b, e),
+    ];
+    final paidTotal = paid.fold<double>(0.0, (t, e) => t + e.amt) + saves.fold<double>(0.0, (t, x) => t + x.$2.a);
+    final spent = spentIn(s, cur);
+
+    // next month: everything due in it (quarterly ones only when they fall in it)
+    final next = occurrencesIn(s, nxt.$1, nxt.$2).where((o) => keep(o.bill)).toList();
+    final nextTotal = next.fold(0.0, (double t, o) => t + o.amt);
+
+    // later: items whose next date is after next month (yearly, far quarterly)
+    final later = s.bills.where((b) => keep(b) && b.date.compareTo(nxt.$2) > 0).toList()..sort((a, b) => a.date.compareTo(b.date));
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
       children: [
-        _salaryCard(s),
-        _accountsCard(s),
+        _monthCard(s, cur, paidTotal, comingTotal, spent),
         for (final f in s.freed) _freedCard(f),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          children: [
-            for (final f in filters.entries)
-              ChoiceChip(
-                label: Text(f.value),
-                selected: _filter == f.key,
-                onSelected: (_) => setState(() => _filter = f.key),
-              ),
-          ],
-        ),
-        if (entries.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Text('Nothing here yet. Tap Add payment.', textAlign: TextAlign.center),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          for (final f in filters.entries)
+            ChoiceChip(label: Text(f.value), selected: _filter == f.key, onSelected: (_) => setState(() => _filter = f.key)),
+        ]),
+
+        _section('⏳ Coming this month', 'Still to pay until ${fmtDate(cur.$2)}', comingTotal),
+        if (coming.isEmpty) _emptyNote('Nothing left to pay this month 🎉'),
+        for (final e in coming) e.save == null ? _billCard(e.bill) : _saveCard(e.bill, e.save!),
+
+        _section('✅ Paid this month', periodRange(cur), paidTotal),
+        if (paid.isEmpty && saves.isEmpty) _emptyNote('Payments you mark as Paid show up here.'),
+        for (final e in paid) _paidRow(s, e),
+        for (final x in saves) _savedRow(x.$1, x.$2),
+
+        _section('📅 Next month', periodRange(nxt), nextTotal,
+            trailing: IconButton(
+              icon: Icon(_showNext ? Icons.expand_less : Icons.expand_more),
+              onPressed: () => setState(() => _showNext = !_showNext),
+            )),
+        if (_showNext) ...[
+          if (next.isEmpty) _emptyNote('Nothing due next month.'),
+          Card(
+            child: Column(children: [for (final o in next) _occRow(o)]),
           ),
-        for (final g in ['over', 'soon', 'ok'])
-          if (entries.any((e) => e.group == g)) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 18, 4, 6),
-              child: Row(children: [
-                Text(titles[g]!, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(width: 8),
-                Text(
-                  eur(entries.where((e) => e.group == g && e.save == null).fold(0.0, (double t, e) => t + nextAmt(e.bill))),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ]),
-            ),
-            for (final e in entries.where((e) => e.group == g))
-              e.save == null ? _billCard(e.bill) : _saveCard(e.bill, e.save!),
-          ],
+        ],
+
+        if (later.isNotEmpty) ...[
+          _section('🗓 Later', 'After ${fmtDate(nxt.$2)}', later.fold(0.0, (double t, b) => t + nextAmt(b)),
+              trailing: IconButton(
+                icon: Icon(_showLater ? Icons.expand_less : Icons.expand_more),
+                onPressed: () => setState(() => _showLater = !_showLater),
+              )),
+          if (_showLater) for (final b in later) _billCard(b),
+        ],
       ],
     );
   }
 
-  Widget _salaryCard(AppState s) {
+  Widget _emptyNote(String t) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        child: Text(t, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      );
+
+  Widget _paidRow(AppState s, PaidEntry e) {
+    final text = Theme.of(context).textTheme;
+    return Card(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: ListTile(
+        leading: Icon(Icons.check_circle, color: Colors.green.shade600),
+        title: Text(e.name, style: const TextStyle(decoration: TextDecoration.lineThrough)),
+        subtitle: Text('Due ${fmtDate(e.due)} · paid ${fmtDate(e.on)} · ${accName[e.acc] ?? e.acc}', style: text.bodySmall),
+        trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(eur(e.amt), style: _tabular.copyWith(fontWeight: FontWeight.w600)),
+          if (canUndo(s, e))
+            TextButton(
+              onPressed: () => _change(() => undoPaid(_s!, e)),
+              child: const Text('Undo'),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _savedRow(Bill b, SaveLogEntry e) => Card(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        child: ListTile(
+          leading: Icon(Icons.savings, color: Colors.green.shade600),
+          title: Text('Saved for ${b.name}'),
+          subtitle: Text('${fmtDate(e.on ?? e.d)} · ${placeOf(b)}', style: Theme.of(context).textTheme.bodySmall),
+          trailing: Text(eur(e.a), style: _tabular.copyWith(fontWeight: FontWeight.w600)),
+        ),
+      );
+
+  Widget _occRow(Occ o) {
+    final b = o.bill;
+    final extra = o.saving
+        ? 'save to ${placeOf(b)}'
+        : '${typeLabel[b.type] ?? b.type}${periodM.containsKey(b.rep) ? ' · ${repLabel[b.rep]}' : ''}';
+    return ListTile(
+      dense: true,
+      leading: SizedBox(
+        width: 44,
+        child: Text(DateFormat('d MMM').format(parseD(o.date)), style: Theme.of(context).textTheme.bodySmall),
+      ),
+      title: Text(o.saving ? 'Save for ${b.name}' : b.name),
+      subtitle: Text('$extra · ${accName[b.acc] ?? b.acc}'),
+      trailing: Text(eur(o.amt), style: _tabular.copyWith(fontWeight: FontWeight.w600)),
+    );
+  }
+
+  Widget _bar(List<(double, Color)> parts) => ClipRRect(
+        borderRadius: BorderRadius.circular(99),
+        child: SizedBox(
+          height: 8,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (final p in parts)
+              if (p.$1 > 0) Expanded(flex: max(1, (p.$1 * 1000).round()), child: ColoredBox(color: p.$2)),
+          ]),
+        ),
+      );
+
+  Widget _monthCard(AppState s, (String, String) cur, double paidTotal, double comingTotal, double spent) {
     final text = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
-    final byType = <String, double>{};
-    for (final b in s.bills) {
-      byType[b.type] = (byType[b.type] ?? 0) + b.amt * (perMonth[b.rep] ?? 0.0);
-    }
-    final fixed = byType.values.fold(0.0, (double a, double b) => a + b);
-    final left = s.salary - fixed;
-    final dueNow = s.bills.fold(0.0, (double t, b) => t + dueThisMonth(b));
-    final overdue = s.bills.where((b) => daysUntil(b.date) < 0).length;
-    final emiLeft = s.bills.where(isLoan).fold(0.0, (double t, b) => t + b.owed!);
+    final left = s.salary - paidTotal - comingTotal - spent;
+    final sal = s.salary > 0 ? s.salary : 1.0;
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -448,7 +684,7 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                Expanded(child: Text('LEFT EACH MONTH AFTER FIXED COSTS', style: text.labelSmall)),
+                Expanded(child: Text('THIS MONTH · ${periodRange(cur).toUpperCase()}', style: text.labelSmall)),
                 const Icon(Icons.edit_outlined, size: 16),
               ]),
               const SizedBox(height: 4),
@@ -456,21 +692,41 @@ class _HomePageState extends State<HomePage> {
                 s.salary > 0 ? eur(left) : 'Tap to add salary',
                 style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w700, color: left < 0 ? cs.error : null),
               ),
-              const SizedBox(height: 6),
-              Text('Salary ${eur(s.salary)} → ${accName[s.salaryAcc]} · fixed costs ${eur(fixed)}', style: text.bodySmall),
-              const SizedBox(height: 8),
-              Wrap(spacing: 12, runSpacing: 2, children: [
-                for (final c in sumCols)
-                  if ((byType[c.$1] ?? 0) > 0) Text('${c.$2} ${eur(byType[c.$1]!)}', style: text.bodySmall),
-              ]),
-              const Divider(height: 20),
-              Row(children: [
-                Expanded(child: _stat('$overdue', 'Overdue', overdue > 0 ? cs.error : null)),
-                Expanded(child: _stat(eur(dueNow), 'Still to pay this month', null)),
-                Expanded(child: _stat(eur(emiLeft), 'EMI balance left', null)),
-              ]),
+              Text('left this month after payments and spending', style: text.bodySmall),
+              if (s.salary > 0) ...[
+                const SizedBox(height: 12),
+                _bar([
+                  (paidTotal / sal, Colors.green.shade600),
+                  (comingTotal / sal, Colors.orange.shade700),
+                  (spent / sal, Colors.purple.shade400),
+                  (max(0.0, left) / sal, cs.surfaceContainerHighest),
+                ]),
+                const SizedBox(height: 8),
+                Text('✅ Paid ${eur(paidTotal)}   ⏳ Coming ${eur(comingTotal)}   💸 Spent ${eur(spent)}   of ${eur(s.salary)}', style: text.bodySmall),
+              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _overviewCard(AppState s) {
+    final cs = Theme.of(context).colorScheme;
+    final overdue = s.bills.where((b) => daysUntil(b.date) < 0).length;
+    final emiLeft = s.bills.where(isLoan).fold<double>(0.0, (t, b) => t + b.owed!);
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _editSalary,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(children: [
+            Expanded(child: _stat(eur(s.salary), 'Salary → ${accName[s.salaryAcc]}', null)),
+            Expanded(child: _stat(eur(monthlyFixed(s)), 'Avg fixed / month', null)),
+            Expanded(child: _stat(eur(emiLeft), 'EMI balance left', null)),
+            if (overdue > 0) Expanded(child: _stat('$overdue', 'Overdue', cs.error)),
+          ]),
         ),
       ),
     );
@@ -487,7 +743,6 @@ class _HomePageState extends State<HomePage> {
   Widget _accountsCard(AppState s) {
     final t = accountTotals(s);
     final lines = transferLines(s);
-    final mon = DateFormat('MMMM').format(DateTime.now());
     final small = Theme.of(context).textTheme.labelSmall;
     return Card(
       child: Padding(
@@ -503,7 +758,7 @@ class _HomePageState extends State<HomePage> {
                 TableRow(children: [
                   Text('ACCOUNT', style: small),
                   Text('AVG / MONTH', style: small, textAlign: TextAlign.right),
-                  Text('DUE IN ${mon.toUpperCase()}', style: small, textAlign: TextAlign.right),
+                  Text('DUE THIS MONTH', style: small, textAlign: TextAlign.right),
                 ]),
                 for (final k in t.keys)
                   TableRow(children: [
@@ -607,7 +862,7 @@ class _HomePageState extends State<HomePage> {
                 if (b.saveLog.isNotEmpty) TextButton(onPressed: () => _history(b), child: const Text('History')),
                 TextButton(onPressed: () => _editBill(b), child: const Text('Edit')),
                 FilledButton.tonal(
-                  onPressed: () => _change(() => pay(_s!, b)),
+                  onPressed: () => _change(() => payAndLog(_s!, b)),
                   child: Text(b.rep == 'none' || last ? 'Paid' : 'Paid → next'),
                 ),
                 IconButton(tooltip: 'Delete', onPressed: () => _deleteBill(b), icon: const Icon(Icons.delete_outline)),
@@ -690,6 +945,16 @@ class _HomePageState extends State<HomePage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 8),
+          child: FilledButton.icon(
+            onPressed: _exportReport,
+            icon: const Icon(Icons.download),
+            label: const Text('Download Excel report'),
+          ),
+        ),
+        _overviewCard(s),
+        _accountsCard(s),
         Card(
           clipBehavior: Clip.antiAlias,
           child: SingleChildScrollView(
@@ -711,7 +976,14 @@ class _HomePageState extends State<HomePage> {
                   DataRow(
                     color: i == 0 ? WidgetStatePropertyAll(cs.surfaceContainerHigh) : null,
                     cells: [
-                      DataCell(Text(i == 0 ? '${monthLabel(rows[i].month)} · now' : monthLabel(rows[i].month))),
+                      DataCell(Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(i == 0 ? '${monthLabel(rows[i].month)} · now' : monthLabel(rows[i].month)),
+                          Text(rows[i].range, style: Theme.of(context).textTheme.bodySmall),
+                        ],
+                      )),
                       if (sal > 0) DataCell(Text(eur(sal), style: _tabular)),
                       for (final c in used) DataCell(Text(money(rows[i].by[c.$1] ?? 0), style: _tabular)),
                       DataCell(Text(
@@ -739,7 +1011,7 @@ class _HomePageState extends State<HomePage> {
           padding: const EdgeInsets.all(8),
           child: Text(
             '${sal > 0 ? 'If you keep these payments, you have about ${eur(totLeft)} left over the next 12 months. ' : 'Add your salary to see what is left each month. '}'
-            'Insurance and other set-aside items count the monthly saving, not the big payment. Debts are not included. Swipe the table sideways to see all columns.',
+            'Each month runs from day ${s.cycleDay} to the day before. Insurance and other set-aside items count the monthly saving, not the big payment. Debts are not included. Swipe the table sideways to see all columns.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
